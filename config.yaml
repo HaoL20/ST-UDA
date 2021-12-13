@@ -1,0 +1,90 @@
+train: # 训练
+  # 基本设定值
+  gpu_id: "1"
+  num_epochs: 25
+  num_workers: 4                              # 양수로 두면 multi-process data loading
+  pin_memory: True              # 当计算机的内存充足的时候，可以设置pin_memory=True。当系统卡住，或者交换内存使用过多的时候，设置pin_memory=False。
+  ITER_MAX: 5000
+  # Directorys
+  checkpoint_dir: "./log/epoch_25_crop_256_batchsize_1_bug"        # Chcekpoint를 저장할 directory
+  output_dir: "./outputs"
+
+  # Related to dataset
+  num_class: 16
+  use_pseudo: False
+  ignore_label: -1
+  color_jitter: True
+  gaussian_blur: True
+  random_mirror: True
+
+  city:
+    resize: True                              #
+    size: 1024,512                            # h, w
+    image_dir: '/home/haol/data/Dataset/公开数据集/cityscape/leftImg8bit'
+    label_dir: '/home/haol/data/Dataset/公开数据集/cityscape/gtFine'            # 生成伪标签的时候，这个路径要会改伪标签所在的文件夹
+
+  gta5:
+    resize: True                              #
+    size: 1280,720                            # h, w
+    use_trans_image: True                                                     # 是否使用图像翻译后GTA5数据集
+    image_dir: '/home/haol/data/Dataset/公开数据集/GTA5/images'
+    trans_image_dir: '/home/haol/data/Dataset/公开数据集/gta5_deeplab/images'    # 的GTA5数据集
+    label_dir: '/home/haol/data/Dataset/公开数据集/GTA5/labels'
+
+  synthia:
+    resize: True                              #
+    size: 1280,760                            # h, w
+    use_trans_image: False
+    image_dir: '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/RGB'
+    trans_image_dir: '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/RGB'
+    label_dir: '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/GT/LABELS'
+
+  # Hyperparameters
+  lr: 0.00002
+  beta: 0.5                                   # Adam optimizer hyperparameter
+  lambda_cycle: 10
+  lambda_ident: 10
+  batch_size: 8
+
+  # Architectures
+  ngf: 64
+  ndf: 32
+  nef: 32
+  nlatent: 16
+  use_dropout: False
+  n_res_blocks: 9
+
+infer: # Data flow를 generation하기 위한 configuration
+  
+  gpu_id: "0 1"
+  batch_size: 1
+  num_workers: 0                              # 양수로 두면 multi-process data loading
+  
+  # Directories
+  data_root_dir: "./datasets"                 # Target, Source 폴더가 있는 directory     
+  infer_dir: "./datasets/GTA5"               # Inference할 데이터가 있는 directory
+  checkpoint_dir: "./model/checkpoint"
+  DLOW_dir: "./datasets/DLOW"
+  DLOW_list_dir: "./datasets/Source_list"
+  # Related to dataset
+  S_nc: 3
+  T_nc: 3
+  S_H: 563                                    # Aspect ratio를 유지하면서 width가 1024가 되도록 하는 height
+  T_H: 512
+  fixed_pair: False
+
+  # Architectures
+  ngf: 64
+  ndf: 32
+  nef: 32
+  nlatent: 16
+  use_dropout: False
+  n_res_blocks: 9
+
+test:
+
+               
+
+
+
+
