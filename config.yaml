@@ -1,89 +1,65 @@
 train: # 训练
-  # 基本设定值
-  gpu_id: "1"
-  num_epochs: 25
-  num_workers: 4                              # 양수로 두면 multi-process data loading
-  pin_memory: True              # 当计算机的内存充足的时候，可以设置pin_memory=True。当系统卡住，或者交换内存使用过多的时候，设置pin_memory=False。
-  ITER_MAX: 5000
-  # Directorys
-  checkpoint_dir: "./log/epoch_25_crop_256_batchsize_1_bug"        # Chcekpoint를 저장할 directory
-  output_dir: "./outputs"
+  # Path related arguments
+  exp_name: 'syn_vgg'
+  log_dir: './log/train/Source_only/syn'
+  checkpoint_dir: ''                            # checkpoint_dir = log_dir + exp_name
 
-  # Related to dataset
-  num_class: 16
-  use_pseudo: False
-  ignore_label: -1
-  color_jitter: True
-  gaussian_blur: True
-  random_mirror: True
+  # Model related arguments
+  backbone: 'vgg16'
+  batch_size: 1
+  pretrained_model_file: None                 # 预训练模型路径（不是imagenet预训练模型）
+  imagenet_pretrained: True                   # 是否用imagenet预训练模型初始化模型
 
-  city:
-    resize: True                              #
-    size: 1024,512                            # h, w
+  # train related arguments
+  seed: 12345                                 # 随机数种子，用于实验复现
+  gpu_id: "0"
+  num_workers: 4
+  pin_memory: True                            # 当计算机的内存充足的时候，可以设置pin_memory=True。当系统卡住，或者交换内存使用过多的时候，设置pin_memory=False。
+  iter_max: 200000                            # the max num of iteration
+  iter_stop: 100000                           # the early stop step
+  iter_epoch: 5000                            # the num of iteration in one epoch
+  iter_show_loss: 1000                        # the num of iteration of print train loss
+
+  # dataset related arguments
+  source_data_name: 'synthia'                 # ['gat5', 'synthia']
+  target_data_name: 'cityscapes'              # cityscapes
+  num_classes: 16
+  use_pseudo: False                           # 是否使用伪标签，只对cityscapes有用
+  ignore_label: -1                            # 忽略的标签
+  color_jitter: True                          # 色彩抖动数据增强
+  gaussian_blur: True                         # 高斯模糊数据增强
+  random_mirror: True                         # 随机镜像数据增强
+
+  cityscapes:
+    resize: True
+    size: 1024,512
     image_dir: '/home/haol/data/Dataset/公开数据集/cityscape/leftImg8bit'
-    label_dir: '/home/haol/data/Dataset/公开数据集/cityscape/gtFine'            # 生成伪标签的时候，这个路径要会改伪标签所在的文件夹
+    label_dir: '/home/haol/data/Dataset/公开数据集/cityscape/gtFine'                  # 生成伪标签的时候，这个路径要会改伪标签所在的文件夹
 
   gta5:
-    resize: True                              #
-    size: 1280,720                            # h, w
-    use_trans_image: True                                                     # 是否使用图像翻译后GTA5数据集
-    image_dir: '/home/haol/data/Dataset/公开数据集/GTA5/images'
-    trans_image_dir: '/home/haol/data/Dataset/公开数据集/gta5_deeplab/images'    # 的GTA5数据集
-    label_dir: '/home/haol/data/Dataset/公开数据集/GTA5/labels'
+    resize: True
+    size: 1280,720
+    use_trans_image: False                                                           # 是否使用图像翻译后GTA5数据集
+    image_dir: '/home/haol/data/Dataset/公开数据集/GTA5/images'                       # GTA5图像文件夹
+    trans_image_dir: '/home/haol/data/Dataset/公开数据集/gta5_deeplab/images'         # 图像翻译后GTA5图像文件夹
+    label_dir: '/home/haol/data/Dataset/公开数据集/GTA5/labels'                       # GTA5标签文件夹
 
   synthia:
-    resize: True                              #
-    size: 1280,760                            # h, w
-    use_trans_image: False
-    image_dir: '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/RGB'
-    trans_image_dir: '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/RGB'
-    label_dir: '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/GT/LABELS'
+    resize: True
+    size: 1280,760
+    use_trans_image: False                                                          # 是否使用图像翻译后synthia数据集
+    image_dir: '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/RGB'               # synthia图像文件夹
+    trans_image_dir: '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/RGB'         # 图像翻译后synthia图像文件夹
+    label_dir: '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/GT/LABELS'         # synthia标签文件夹
 
-  # Hyperparameters
-  lr: 0.00002
-  beta: 0.5                                   # Adam optimizer hyperparameter
-  lambda_cycle: 10
-  lambda_ident: 10
-  batch_size: 8
 
-  # Architectures
-  ngf: 64
-  ndf: 32
-  nef: 32
-  nlatent: 16
-  use_dropout: False
-  n_res_blocks: 9
-
-infer: # Data flow를 generation하기 위한 configuration
-  
-  gpu_id: "0 1"
-  batch_size: 1
-  num_workers: 0                              # 양수로 두면 multi-process data loading
-  
-  # Directories
-  data_root_dir: "./datasets"                 # Target, Source 폴더가 있는 directory     
-  infer_dir: "./datasets/GTA5"               # Inference할 데이터가 있는 directory
-  checkpoint_dir: "./model/checkpoint"
-  DLOW_dir: "./datasets/DLOW"
-  DLOW_list_dir: "./datasets/Source_list"
-  # Related to dataset
-  S_nc: 3
-  T_nc: 3
-  S_H: 563                                    # Aspect ratio를 유지하면서 width가 1024가 되도록 하는 height
-  T_H: 512
-  fixed_pair: False
-
-  # Architectures
-  ngf: 64
-  ndf: 32
-  nef: 32
-  nlatent: 16
-  use_dropout: False
-  n_res_blocks: 9
-
-test:
-
-               
+  # optimization related arguments
+  optim: 'SGD'                                # SGD or Adam
+  lr: 0.00025                                 # learning rate
+  beta: 0.5                                   # Adam optimizer hyper parameter
+  momentum: 0.9                               # SGD optimizer hyper parameter
+  weight_decay: 0.0005                        # optimizer hyper parameter
+  poly_power: 0.9                             # poly_power
 
 
 
