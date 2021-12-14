@@ -162,7 +162,7 @@ class Trainer:
 
             # epoch迭代结束
             if batch_idx == self.train_iterations - 1:
-                self.save_images(images, labels, arg_preds)  # 可视化最后一次迭代的图片
+                self.save_images(images, labels, arg_preds, 'source_train')  # 可视化最后一次迭代的图片
                 tqdm.write("The average loss of train epoch-{}-:{}".format(self.current_epoch, train_loss_avg))  # 打印最后一次迭代的loss
                 tqdm_epoch.close()
                 break
