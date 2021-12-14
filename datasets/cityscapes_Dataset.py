@@ -18,7 +18,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class City_Dataset(data.Dataset):
-    def __init__(self, image_dir, label_dir, size, num_class, ignore_label=-1, split='train', resize=True,
+    def __init__(self, image_dir, label_dir, size, num_classes, ignore_label=-1, split='train', resize=True,
                  use_pseudo=False, gaussian_blur=False, color_jitter=False, random_mirror=False):
 
         self.size = size                        # resize大小
@@ -26,7 +26,7 @@ class City_Dataset(data.Dataset):
         self.resize = resize                    # 是否resize
         self.image_dir = image_dir              # 数据集图像路径，eg: home/haol/data/Dataset/cityscape/gtFine
         self.label_dir = label_dir              # 数据集标签路径，eg：/home/haol/data/Dataset/cityscape/leftImg8bit
-        self.num_class = num_class              # 类别数，GTA5-to-Cityscapes为19，SYNTHIA-to-Cityscapes为16
+        self.num_classes = num_classes              # 类别数，GTA5-to-Cityscapes为19，SYNTHIA-to-Cityscapes为16
         self.use_pseudo = use_pseudo            # 是否加载伪标签（加载伪标签的情况下，读取的伪标签已经映射好了，只需要将255映射为ignore_label）
         self.ignore_label = ignore_label        # 忽略的标签序号
 
@@ -48,7 +48,7 @@ class City_Dataset(data.Dataset):
         self.train_id_to_16id[255] = ignore_label
 
         # 获取数据集路径列表
-        self.items = [i for i in open(os.path.join('Cityscapes', self.split + ".txt"))]
+        self.items = [i for i in open(os.path.join('datasets/Cityscapes', self.split + ".txt"))]
 
     def __getitem__(self, index):
         id_image, id_label = self.items[index].strip('\n').split(' ')
@@ -74,7 +74,7 @@ class City_Dataset(data.Dataset):
 
         # 随机翻转
         if self.random_mirror and random.random() < mirror_p and is_train:
-            print(self.random_mirror, self.gen_pseudo)
+
             assert not (self.gen_pseudo == self.random_mirror and self.gen_pseudo is True)  # 生成伪标签的时候，不能random_mirror
             image = image.transpose(Image.FLIP_LEFT_RIGHT)
             label = label.transpose(Image.FLIP_LEFT_RIGHT)
@@ -106,7 +106,7 @@ class City_Dataset(data.Dataset):
         label_copy = self.ignore_label * np.ones(label.shape, dtype=np.float32)
         for k, v in self.id_to_train_id.items():    # 转换为train_id
             label_copy[label == k] = v
-        if self.num_class == 16:                    # 转换为16类
+        if self.num_classes == 16:                    # 转换为16类
             label_copy_16 = self.ignore_label * np.ones(label.shape, dtype=np.float32)
             for k, v in self.train_id_to_16id.items():
                 label_copy_16[label_copy == k] = v
@@ -122,13 +122,13 @@ class City_Dataset(data.Dataset):
 
 def get_city_dataloader(conf, split):
     assert split in ['train', 'val']
-    conf_city = conf['city']
+    conf_city = conf['cityscapes']
     data_set = City_Dataset(split=split,
                             size=conf_city['size'],
                             resize=conf_city['resize'],
                             image_dir=conf_city['image_dir'],
                             label_dir=conf_city['label_dir'],
-                            num_class=conf['num_class'],
+                            num_classes=conf['num_classes'],
                             use_pseudo=conf['use_pseudo'],
                             ignore_label=conf['ignore_label'],
                             color_jitter=conf['color_jitter'],
@@ -145,59 +145,12 @@ def get_city_dataloader(conf, split):
     return data_loader
 
 
-class City_DataLoader:
-    def __init__(self, conf):
-        conf_city = conf['city']
-        # 训练集
-        data_set = City_Dataset(split='train',
-                                size=conf_city['size'],
-                                resize=conf_city['resize'],
-                                image_dir=conf_city['image_dir'],
-                                label_dir=conf_city['label_dir'],
-                                num_class=conf['num_class'],
-                                use_pseudo=conf['use_pseudo'],
-                                ignore_label=conf['ignore_label'],
-                                color_jitter=conf['color_jitter'],
-                                gaussian_blur=conf['gaussian_blur'],
-                                random_mirror=conf['random_mirror'])
-
-        self.train_loader = data.DataLoader(dataset=data_set,
-                                            batch_size=conf['batch_size'],
-                                            pin_memory=conf['pin_memory'],
-                                            num_workers=conf['num_workers'],
-                                            shuffle=True,
-                                            drop_last=True)
-
-        # 评估集
-        val_set = City_Dataset(split='val',
-                               size=conf_city['size'],
-                               resize=conf_city['resize'],
-                               image_dir=conf_city['image_dir'],
-                               label_dir=conf_city['label_dir'],
-                               num_class=conf['num_class'],
-                               use_pseudo=conf['use_pseudo'],
-                               ignore_label=conf['ignore_label'],
-                               color_jitter=conf['color_jitter'],
-                               gaussian_blur=conf['gaussian_blur'],
-                               random_mirror=conf['random_mirror'])
-
-        self.val_loader = data.DataLoader(dataset=val_set,
-                                          batch_size=conf['batch_size'],
-                                          pin_memory=conf['pin_memory'],  # 当计算机的内存充足的时候，可以设置pin_memory=True。当系统卡住，或者交换内存使用过多的时候，设置pin_memory=False。
-                                          num_workers=conf['num_workers'],
-                                          shuffle=False,
-                                          drop_last=True)
-
-        self.train_iterations = len(val_set) // conf['batch_size'] + 1  # 训练集一个epoch迭代次数
-        self.valid_iterations = len(val_set) // conf['batch_size'] + 1  # 评估集一个epoch迭代次数
-
-
 if __name__ == '__main__':
     # Reading configuration file
     config = yaml.load(open("../config.yaml", "r"), Loader=yaml.FullLoader)
     train_conf = config['train']
-    train_conf['city']['size'] = tuple(map(int, train_conf['city']['size'].split(',')))     # 将size的h,w转换为int，并且组合为tuple类型
-    train_loader = get_city_dataloader(config['train'], split='val')
+    train_conf['cityscapes']['size'] = tuple(map(int, train_conf['cityscapes']['size'].split(',')))     # 将size的h,w转换为int，并且组合为tuple类型
+    train_loader = get_city_dataloader(config['train'], split='train')
 
     if os.path.exists('demo_img/city/') is False:
         os.makedirs('demo_img/city/')
@@ -230,10 +183,11 @@ if __name__ == '__main__':
         img.save('demo_img/city/Cityscape_Demo_{}_method_2.jpg'.format(idx))
 
         # 可视化标签
-        labels = torch.unsqueeze(labels, dim=1)                                     # (b,h,w)   ==> (b,1,h,w)，make_grid只能处理4维的向量，三维的label必须扩充一个通道的维度
-        labels = torchvision.utils.make_grid(labels, nrow=4)                        # (b,1,h,w) ==> (3,h,w), 单通道会被扩充到3通道。
-        labels = labels.numpy()[0]                                                  # (3,h,w)   ==> (h,w)，  转换为numpy，取单通道。P模式的图片必须要单通道。
-        output_col = utils.colorize_mask(labels, train_conf['num_class'])           # 转换为P模式的Image，并且换上对应的调试板，将其可视化。
+        labels = torch.unsqueeze(labels, dim=1)                 # (b,h,w)   ==> (b,1,h,w)，make_grid只能处理4维的向量，三维的label必须扩充一个通道的维度
+        labels = torchvision.utils.make_grid(labels, nrow=4)    # (b,1,h,w) ==> (3,h,w), 单通道会被扩充到3通道。
+        labels = labels.numpy()[0]                              # (3,h,w)   ==> (h,w)，  转换为numpy，取单通道。P模式的图片必须要单通道。
+
+        output_col = utils.colorize_mask(labels, train_conf['num_classes'])         # 转换为P模式的Image，并且换上对应的调试板，将其可视化。
         output_col.save('demo_img/city/Cityscape_Demo_label_{}.png'.format(idx))
 
         if idx > 2:

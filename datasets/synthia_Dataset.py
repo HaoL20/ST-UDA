@@ -19,7 +19,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class SYNTHIA_Dataset(data.Dataset):
-    def __init__(self, image_dir, label_dir, size, num_class=16, ignore_label=-1, split='train',
+    def __init__(self, image_dir, label_dir, size, num_classes=16, ignore_label=-1, split='train',
                  resize=True, gaussian_blur=False, color_jitter=False, random_mirror=False):
 
         self.size = size                        # resize大小
@@ -27,7 +27,7 @@ class SYNTHIA_Dataset(data.Dataset):
         self.resize = resize                    # 是否resize
         self.image_dir = image_dir              # 数据集图像路径，eg: /home/haol/data/Dataset/公开数据集/GTA5/images
         self.label_dir = label_dir              # 数据集标签路径，eg：/home/haol/data/Dataset/公开数据集/GTA5/labels
-        self.num_class = num_class              # 类别数，GTA5-to-Cityscapes为19
+        self.num_classes = num_classes              # 类别数，GTA5-to-Cityscapes为19
         self.ignore_label = ignore_label        # 忽略的标签序号
 
         # 图像增强
@@ -40,7 +40,7 @@ class SYNTHIA_Dataset(data.Dataset):
                                10: 10, 11: 15, 12: 14, 15: 6, 17: 11, 19: 13, 21: 3}
 
         # 获取数据集路径列表
-        self.items = [i for i in open(os.path.join('SYNTHIA', self.split + ".txt"))]
+        self.items = [i for i in open(os.path.join('datasets/SYNTHIA', self.split + ".txt"))]
 
     def __getitem__(self, index):
         id_image, id_label = self.items[index].strip('\n').split(' ')
@@ -104,7 +104,7 @@ def get_syn_dataloader(conf, split):
                                resize=conf_syn['resize'],
                                image_dir=conf_syn['image_dir'],
                                label_dir=conf_syn['label_dir'],
-                               num_class=conf['num_class'],
+                               num_classes=conf['num_classes'],
                                ignore_label=conf['ignore_label'],
                                color_jitter=conf['color_jitter'],
                                gaussian_blur=conf['gaussian_blur'],
@@ -130,7 +130,7 @@ if __name__ == '__main__':
     if conf_syn['use_trans_image'] is True:
         conf_syn['image_dir'] = conf_syn['trans_image_dir']
 
-    train_loader = get_syn_dataloader(config['train'], split='val')
+    train_loader = get_syn_dataloader(config['train'], split='train')
     if os.path.exists('demo_img/syn/') is False:
         os.makedirs('demo_img/syn/')
 
@@ -162,10 +162,11 @@ if __name__ == '__main__':
         img.save('demo_img/syn/syn_Demo_{}_method_2.jpg'.format(idx))
 
         # 可视化标签
-        labels = torch.unsqueeze(labels, dim=1)                             # (b,h,w)   ==> (b,1,h,w)，make_grid只能处理4维的向量，三维的label必须扩充一个通道的维度
-        labels = torchvision.utils.make_grid(labels, nrow=4)                # (b,1,h,w) ==> (3,h,w), 单通道会被扩充到3通道。
-        labels = labels.numpy()[0]                                          # (3,h,w)   ==> (h,w)，  转换为numpy，取单通道。P模式的图片必须要单通道。
-        output_col = utils.colorize_mask(labels, train_conf['num_class'])   # 转换为P模式的Image，并且换上对应的调试板，将其可视化。
+        labels = torch.unsqueeze(labels, dim=1)                 # (b,h,w)   ==> (b,1,h,w)，make_grid只能处理4维的向量，三维的label必须扩充一个通道的维度
+        labels = torchvision.utils.make_grid(labels, nrow=4)    # (b,1,h,w) ==> (3,h,w), 单通道会被扩充到3通道。
+        labels = labels.numpy()[0]                              # (3,h,w)   ==> (h,w)，  转换为numpy，取单通道。P模式的图片必须要单通道。
+
+        output_col = utils.colorize_mask(labels, train_conf['num_classes'])   # 转换为P模式的Image，并且换上对应的调试板，将其可视化。
         output_col.save('demo_img/syn/syn_Demo_label_{}.png'.format(idx))
 
         if idx > 2:
