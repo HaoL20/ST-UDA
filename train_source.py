@@ -311,12 +311,24 @@ def init_config(config_path):
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-    # set seed
+    # 保证可复现性
+
     random.seed(train_conf['seed'])
     np.random.seed(train_conf['seed'])
     torch.random.manual_seed(train_conf['seed'])
-    torch.backends.cudnn.benchmark = True
+    # torch.backends.cudnn.benchmark = True
 
+    torch.manual_seed(train_conf['seed'])  # 为CPU设置随机种子
+    torch.cuda.manual_seed(train_conf['seed'])  # 为当前GPU设置随机种子
+    torch.cuda.manual_seed_all(train_conf['seed'])  # 为所有GPU设置随机种子
+
+    os.environ['PYTHONHASHSEED'] = str(train_conf['seed'])
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    # 可复现设计细节参考：
+    # https://zhuanlan.zhihu.com/p/73711222
+    # https://blog.csdn.net/weixin_42587961/article/details/109363698
     return train_conf, device, logger
 
 
