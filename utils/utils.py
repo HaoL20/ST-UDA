@@ -8,7 +8,7 @@ from datasets.cityscapes_Dataset import get_city_dataloader
 from datasets.gta5_Dataset import get_gta5_dataloader
 from datasets.synthia_Dataset import get_syn_dataloader
 # class 19 colour map
-label_colours_19 = label_colours_19 = [
+label_colours_19 = [
     (128, 64, 128), (244, 35, 232), (70, 70, 70), (102, 102, 156), (190, 153, 153),
     (153, 153, 153), (250, 170, 30), (220, 220, 0), (107, 142, 35), (152, 251, 152),
     (0, 130, 180), (220, 20, 60), (255, 0, 0), (0, 0, 142), (0, 0, 70), (0, 60, 100),
