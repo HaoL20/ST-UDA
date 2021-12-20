@@ -3,26 +3,26 @@ import numpy as np
 np.seterr(divide='ignore', invalid='ignore')
 
 name_classes = [
-    'road',
-    'sidewalk',
-    'building',
-    'wall',
-    'fence',
-    'pole',
-    'trafflight',
-    'traffsign',
-    'vegetation',
-    'terrain',
-    'sky',
-    'person',
-    'rider',
-    'car',
-    'truck',
-    'bus',
-    'train',
-    'motorcycle',
-    'bicycle',
-    'unlabeled'
+    'road',             # 0
+    'sidewalk',         # 1
+    'building',         # 2
+    'wall',             # 3
+    'fence',            # 4
+    'pole',             # 5
+    'trafflight',       # 6
+    'traffsign',        # 7
+    'vegetation',       # 8
+    'terrain',          # 9
+    'sky',              # 10
+    'person',           # 11
+    'rider',            # 12
+    'car',              # 13
+    'truck',            # 14
+    'bus',              # 15
+    'train',            # 16
+    'motorcycle',       # 17
+    'bicycle',          # 18
+    'unlabeled'         # 19
 ]
 synthia_set_16 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 15, 17, 18]
 synthia_set_13 = [0, 1, 2, 6, 7, 8, 10, 11, 12, 13, 15, 17, 18]
