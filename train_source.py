@@ -1,11 +1,9 @@
 import os
-
 import yaml
-import torch
-import torch.nn as nn
+import shutil
 import random
 import logging
-import numpy as np
+import torch.nn as nn
 from tqdm import tqdm
 from math import ceil
 
@@ -290,6 +288,9 @@ def init_config(config_path):
     except FileNotFoundError:
         print('Missing parent folder in path:  {}'.format(checkpoint_dir))
         exit()
+
+    # save config
+    shutil.copy(config_path, checkpoint_dir)
 
     # Device configure
     if torch.cuda.is_available():
