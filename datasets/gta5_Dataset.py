@@ -121,7 +121,7 @@ def get_gta5_dataloader(conf, split):
 
 if __name__ == '__main__':
     # Reading configuration file
-    config = yaml.load(open("../config.yaml", "r"), Loader=yaml.FullLoader)
+    config = yaml.load(open("../config/config_train_source.yaml", "r"), Loader=yaml.FullLoader)
     train_conf = config['train']
     conf_gta5 = train_conf['gta5']
 

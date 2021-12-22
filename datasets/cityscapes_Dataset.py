@@ -147,7 +147,7 @@ def get_city_dataloader(conf, split):
 
 if __name__ == '__main__':
     # Reading configuration file
-    config = yaml.load(open("../config.yaml", "r"), Loader=yaml.FullLoader)
+    config = yaml.load(open("../config/config_train_source.yaml", "r"), Loader=yaml.FullLoader)
     train_conf = config['train']
     train_conf['cityscapes']['size'] = tuple(map(int, train_conf['cityscapes']['size'].split(',')))     # 将size的h,w转换为int，并且组合为tuple类型
     train_loader = get_city_dataloader(config['train'], split='train')
