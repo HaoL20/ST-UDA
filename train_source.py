@@ -315,25 +315,27 @@ def init_config(config_path):
 
     random.seed(train_conf['seed'])
     np.random.seed(train_conf['seed'])
-    torch.random.manual_seed(train_conf['seed'])
-    # torch.backends.cudnn.benchmark = True
 
+    torch.random.manual_seed(train_conf['seed'])
     torch.manual_seed(train_conf['seed'])  # 为CPU设置随机种子
     torch.cuda.manual_seed(train_conf['seed'])  # 为当前GPU设置随机种子
     torch.cuda.manual_seed_all(train_conf['seed'])  # 为所有GPU设置随机种子
 
+    torch.backends.cudnn.benchmark = True
     os.environ['PYTHONHASHSEED'] = str(train_conf['seed'])
 
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    # 可复现设计细节参考：
-    # https://zhuanlan.zhihu.com/p/73711222
-    # https://blog.csdn.net/weixin_42587961/article/details/109363698
+    # torch.backends.cudnn.deterministic = True
+    # # torch.backends.cudnn.benchmark = False
+    # # 可复现设计细节参考：
+    # # https://zhuanlan.zhihu.com/p/73711222
+    # # https://blog.csdn.net/weixin_42587961/article/details/109363698
+    # # https://www.jianshu.com/p/1b9e18146045
+    # # https://www.it610.com/article/1293854112777052160.htm
     return train_conf, device, logger
 
 
 def main():
-    config_path = "./config.yaml"
+    config_path = "config/config_train_source.yaml"
     train_conf, logger, device = init_config(config_path)
     agent = Trainer(train_conf, logger, device)
     agent.main()
