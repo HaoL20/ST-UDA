@@ -146,11 +146,9 @@ class Trainer:
             train_loss_avg = sum(train_loss) / len(train_loss)
             self.writer.add_scalar('train_loss', train_loss_avg, self.current_epoch)
 
+            arg_preds = torch.argmax(preds, dim=1)                      # 预测结果，(b,c,h,w) ==> (b,h,w)
             # 更新混淆矩阵
-            preds = preds.data.cpu().numpy()  # size：(b,c,h,w)
-            labels = labels.cpu().numpy()  # size: (b,h,w)
-            arg_preds = np.argmax(preds, axis=1)  # size: (b,h,w)
-            self.Eval.add_batch(labels, arg_preds)
+            self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
 
             self.current_iter += 1  # 更新总迭代次数
 
@@ -182,15 +180,17 @@ class Trainer:
                 # unpack data
                 images, labels, id_labels = data
 
-                images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,h,w)
-                labels = torch.squeeze(labels, 1)  # (b,h,w) ==> (b,1, h,w)
+                b, H, W = labels.shape
+                images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)    # (b,3,h,w), (b,H,W) val评估的时候，需要原图大小的标签
+                labels = torch.squeeze(labels, 1)                                                           # (b,H,W) ==> (b,1,H,W)
 
-                preds, _ = self.model(images)  # prediction, feature
-                preds = preds.data.cpu().numpy()
-                labels = labels.cpu().numpy()
-                arg_preds = np.argmax(preds, axis=1)
+                preds, _ = self.model(images)                                                               # prediction, feature
+                arg_preds = torch.argmax(preds, dim=1, keepdim=True)                                        # 预测类别, (b,c,h,w) ==> (b,1,h,w) (要对h，w上采样，interpolate输入必须为4维。因此要keepdim)
+                arg_preds = arg_preds.to(torch.float32)                                                     # interpolate 不能处理int类型
+                arg_preds = nn.functional.interpolate(arg_preds, size=(H, W), mode='nearest')               # (b,1,h,w) ==> (b,1,H,W) 上采样
+                arg_preds = arg_preds.squeeze(dim=1).to(torch.int64)                                        # (b,1,H,W) ==> (b,H,W), 和labels数据类型一致
 
-                self.Eval.add_batch(labels, arg_preds)
+                self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
 
             #  可视化最后一次迭代的图片
             self.save_images(images, labels, arg_preds, name)
@@ -203,8 +203,8 @@ class Trainer:
 
         # show train image on tensorboard
         images_inv = inv_preprocess(images.clone().cpu())
-        labels_colors = decode_labels(torch.tensor(labels), self.num_classes)
-        preds_colors = decode_labels(torch.tensor(arg_preds), self.num_classes)
+        labels_colors = decode_labels(labels, self.num_classes)
+        preds_colors = decode_labels(arg_preds, self.num_classes)
         self.writer.add_image('{}/Images'.format(name), images_inv, self.current_epoch)
         self.writer.add_image('{}/Labels'.format(name), labels_colors, self.current_epoch)
         self.writer.add_image('{}/preds'.format(name), preds_colors, self.current_epoch)

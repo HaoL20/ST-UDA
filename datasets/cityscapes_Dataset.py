@@ -70,11 +70,11 @@ class City_Dataset(data.Dataset):
 
         if self.resize:
             image = image.resize(self.size, Image.BICUBIC)
-            label = label.resize(self.size, Image.NEAREST)
+            if is_train:                                                                    # val评估的时候，需要原图大小的标签去评估
+                label = label.resize(self.size, Image.NEAREST)
 
         # 随机翻转
         if self.random_mirror and random.random() < mirror_p and is_train:
-
             assert not (self.gen_pseudo == self.random_mirror and self.gen_pseudo is True)  # 生成伪标签的时候，不能random_mirror
             image = image.transpose(Image.FLIP_LEFT_RIGHT)
             label = label.transpose(Image.FLIP_LEFT_RIGHT)
