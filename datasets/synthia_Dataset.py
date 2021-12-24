@@ -26,8 +26,7 @@ class SYNTHIA_Dataset(data.Dataset):
         self.split = split                      # train,val
         self.resize = resize                    # 是否resize
         self.image_dir = image_dir              # 数据集图像路径，eg: /home/haol/data/Dataset/公开数据集/GTA5/images
-        self.label_dir = label_dir              # 数据集标签路径，eg：/home/haol/data/Dataset/公开数据集/GTA5/labels
-        self.num_classes = num_classes              # 类别数，GTA5-to-Cityscapes为19
+        self.num_classes = num_classes          # 类别数，GTA5-to-Cityscapes为19
         self.ignore_label = ignore_label        # 忽略的标签序号
 
         # 图像增强
