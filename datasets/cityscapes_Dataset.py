@@ -25,8 +25,7 @@ class City_Dataset(data.Dataset):
         self.split = split                      # train,val
         self.resize = resize                    # 是否resize
         self.image_dir = image_dir              # 数据集图像路径，eg: home/haol/data/Dataset/cityscape/gtFine
-        self.label_dir = label_dir              # 数据集标签路径，eg：/home/haol/data/Dataset/cityscape/leftImg8bit
-        self.num_classes = num_classes              # 类别数，GTA5-to-Cityscapes为19，SYNTHIA-to-Cityscapes为16
+        self.num_classes = num_classes          # 类别数，GTA5-to-Cityscapes为19，SYNTHIA-to-Cityscapes为16
         self.use_pseudo = use_pseudo            # 是否加载伪标签（加载伪标签的情况下，读取的伪标签已经映射好了，只需要将255映射为ignore_label）
         self.ignore_label = ignore_label        # 忽略的标签序号
 
@@ -36,6 +35,12 @@ class City_Dataset(data.Dataset):
         self.gaussian_blur = gaussian_blur      # 高斯模糊
 
         self.gen_pseudo = False                 # 是否用于生成伪标签，默认为False,通过switch_to_gen_pseudo切换为True
+
+        self.is_train = (self.split == 'train')
+        if self.is_train and self.resize is False:
+            self.label_dir = label_dir['resize']      # 如果数据集已经resize过，并且是训练阶段的话，用resize后的标签路径
+        else:
+            self.label_dir = label_dir['no_resize']     # 如果是测试阶段，或者是没有resize过的话，用no_resize的标签路径
 
         # GTA5-to-Cityscapes 实验中，只考虑共享的19类
         self.id_to_train_id = {7: 0, 8: 1, 11: 2, 12: 3, 13: 4, 17: 5,
@@ -56,7 +61,7 @@ class City_Dataset(data.Dataset):
         label_path = self.label_dir + id_label
         image = Image.open(image_path).convert("RGB")
         label = Image.open(label_path)
-        image, label = self._sync_transform(image=image, label=label, is_train=(self.split == 'train'))
+        image, label = self._sync_transform(image=image, label=label, is_train=self.is_train)
 
         return image, label, id_label
 
@@ -145,18 +150,20 @@ def get_city_dataloader(conf, split):
     return data_loader
 
 
-if __name__ == '__main__':
+def test_dataset():
+    os.chdir('..')  # 改变当前工作目录到上一级目录(项目目录)
+
     # Reading configuration file
-    config = yaml.load(open("../config/config_train_source.yaml", "r"), Loader=yaml.FullLoader)
+    config = yaml.load(open("config/config_train_source.yaml", "r"), Loader=yaml.FullLoader)
     train_conf = config['train']
     train_conf['cityscapes']['size'] = tuple(map(int, train_conf['cityscapes']['size'].split(',')))     # 将size的h,w转换为int，并且组合为tuple类型
-    train_loader = get_city_dataloader(config['train'], split='train')
+    train_loader = get_city_dataloader(config['train'], split='val')
 
-    if os.path.exists('demo_img/city/') is False:
-        os.makedirs('demo_img/city/')
+    if os.path.exists('datasets/demo_img/city/') is False:
+        os.makedirs('datasets/demo_img/city/')
 
-    for idx, data in enumerate(train_loader):
-        images, labels, id_labels = data  # (b,3,h,w), (b,h,w)
+    for idx, pack_data in enumerate(train_loader):
+        images, labels, id_labels = pack_data  # (b,3,h,w), (b,h,w)
         # 文件名
         print(id_labels)
 
@@ -171,7 +178,7 @@ if __name__ == '__main__':
         img = np.transpose(img, (1, 2, 0)) * 255                                    # (3,H,W) ==> (H,W,3)
         # img = img[:, :, ::-1]                                                     # 如果加载为BGR的模式，需要转换为RGB的模式
         img = Image.fromarray(np.uint8(img))                                        # 转换为uint8，再转换为Image
-        img.save('demo_img/city/Cityscape_Demo_{}.jpg'.format(idx))
+        img.save('datasets/demo_img/city/Cityscape_Demo_{}.jpg'.format(idx))
 
         # 方法2
         # make_grid函数也支持normalize复原，normalize=True即可。
@@ -180,7 +187,7 @@ if __name__ == '__main__':
         img = np.transpose(img, (1, 2, 0)) * 255
         # img = img[:, :, ::-1]
         img = Image.fromarray(np.uint8(img))
-        img.save('demo_img/city/Cityscape_Demo_{}_method_2.jpg'.format(idx))
+        img.save('datasets/demo_img/city/Cityscape_Demo_{}_method_2.jpg'.format(idx))
 
         # 可视化标签
         labels = torch.unsqueeze(labels, dim=1)                 # (b,h,w)   ==> (b,1,h,w)，make_grid只能处理4维的向量，三维的label必须扩充一个通道的维度
@@ -188,7 +195,11 @@ if __name__ == '__main__':
         labels = labels.numpy()[0]                              # (3,h,w)   ==> (h,w)，  转换为numpy，取单通道。P模式的图片必须要单通道。
 
         output_col = utils.colorize_mask(labels, train_conf['num_classes'])         # 转换为P模式的Image，并且换上对应的调试板，将其可视化。
-        output_col.save('demo_img/city/Cityscape_Demo_label_{}.png'.format(idx))
+        output_col.save('datasets/demo_img/city/Cityscape_Demo_label_{}.png'.format(idx))
 
         if idx > 2:
             break
+
+
+if __name__ == '__main__':
+    test_dataset()

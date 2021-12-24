@@ -34,6 +34,12 @@ class GTA5_Dataset(data.Dataset):
         self.random_mirror = random_mirror      # 随机镜像
         self.gaussian_blur = gaussian_blur      # 高斯模糊
 
+        self.is_train = (self.split == 'train')
+        if self.is_train and self.resize is False:
+            self.label_dir = label_dir['resize']      # 如果数据集已经resize过，并且是训练阶段的话，用resize后的标签路径
+        else:
+            self.label_dir = label_dir['no_resize']     # 如果是测试阶段，或者是没有resize过的话，用no_resize的标签路径
+
         # GTA5-to-Cityscapes 实验中，只考虑共享的19类
         self.id_to_train_id = {7: 0, 8: 1, 11: 2, 12: 3, 13: 4, 17: 5,
                                19: 6, 20: 7, 21: 8, 22: 9, 23: 10, 24: 11, 25: 12,
@@ -48,7 +54,7 @@ class GTA5_Dataset(data.Dataset):
         label_path = self.label_dir + id_label
         image = Image.open(image_path).convert("RGB")
         label = Image.open(label_path)
-        image, label = self._sync_transform(image=image, label=label, is_train=(self.split == 'train'))
+        image, label = self._sync_transform(image=image, label=label, is_train=self.is_train)
 
         return image, label, id_label
 
@@ -62,7 +68,8 @@ class GTA5_Dataset(data.Dataset):
 
         if self.resize:
             image = image.resize(self.size, Image.BICUBIC)
-            label = label.resize(self.size, Image.NEAREST)
+            if self.is_train:
+                label = label.resize(self.size, Image.NEAREST)
 
         # 随机翻转
         if self.random_mirror and random.random() < mirror_p and is_train:
@@ -119,9 +126,11 @@ def get_gta5_dataloader(conf, split):
     return data_loader
 
 
-if __name__ == '__main__':
+def test_dataset():
+    os.chdir('..')  # 改变当前工作目录到上一级目录(项目目录)
+
     # Reading configuration file
-    config = yaml.load(open("../config/config_train_source.yaml", "r"), Loader=yaml.FullLoader)
+    config = yaml.load(open("config/config_train_source.yaml", "r"), Loader=yaml.FullLoader)
     train_conf = config['train']
     conf_gta5 = train_conf['gta5']
 
@@ -129,44 +138,32 @@ if __name__ == '__main__':
     if conf_gta5['use_trans_image'] is True:
         conf_gta5['image_dir'] = conf_gta5['trans_image_dir']
 
-    train_loader = get_gta5_dataloader(config['train'], split='train')
-    if os.path.exists('demo_img/gta5/') is False:
-        os.makedirs('demo_img/gta5/')
+    train_loader = get_gta5_dataloader(config['train'], split='val')
+    if os.path.exists('datasets/demo_img/gta5/') is False:
+        os.makedirs('datasets/demo_img/gta5/')
 
-    for idx, data in enumerate(train_loader):
-        images, labels, id_labels = data  # (b,3,h,w), (b,h,w)
+    for idx, pack_data in enumerate(train_loader):
+        images, labels, id_labels = pack_data  # (b,3,h,w), (b,h,w)
         # 文件名
         print(id_labels)
 
         # 可视化图像
-        # 方法1
-        # Normalize的图像复原，归一化到之前的【0，1】之间
-        mean = torch.as_tensor([.485, .456, .406], dtype=images.dtype, device=images.device).view(-1, 1, 1)  # (3) ==> (3,1,1)，这样才可以进行后面的广播运算
-        std = torch.as_tensor([.229, .224, .225], dtype=images.dtype, device=images.device).view(-1, 1, 1)
-        img = images * std + mean
-
-        img = torchvision.utils.make_grid(img, nrow=4).numpy()              # (b,3,h,w) ==> (3,H,W)。其中H，W是把b张图片按照相应规则(每行最多4张图片)拼接成的新图片的尺寸。
-        img = np.transpose(img, (1, 2, 0)) * 255                            # (3,H,W) ==> (H,W,3)
-        # img = img[:, :, ::-1]                                             # 如果加载为BGR的模式，需要转换为RGB的模式
-        img = Image.fromarray(np.uint8(img))                                # 转换为uint8，再转换为Image
-        img.save('demo_img/gta5/GTA5_Demo_{}.jpg'.format(idx))
-
-        # 方法2
-        # make_grid函数也支持normalize复原，normalize=True即可。
-        # 但是是通过(img-min)/(max - min + 1e-5)将img归一化到【0，1】，会和用mean、std归一化的图像有些许差别
-        img = torchvision.utils.make_grid(images, nrow=4, normalize=True).numpy()   # 使用make_grid的normalize
+        img = torchvision.utils.make_grid(images, nrow=4, normalize=True).numpy()  # 使用make_grid的normalize
         img = np.transpose(img, (1, 2, 0)) * 255
-        # img = img[:, :, ::-1]
         img = Image.fromarray(np.uint8(img))
-        img.save('demo_img/gta5/GTA5_Demo_{}_method_2.jpg'.format(idx))
+        img.save('datasets/demo_img/gta5/GTA5_Demo_{}.jpg'.format(idx))
 
         # 可视化标签
-        labels = torch.unsqueeze(labels, dim=1)                 # (b,h,w)   ==> (b,1,h,w)，make_grid只能处理4维的向量，三维的label必须扩充一个通道的维度
-        labels = torchvision.utils.make_grid(labels, nrow=4)    # (b,1,h,w) ==> (3,h,w), 单通道会被扩充到3通道。
-        labels = labels.numpy()[0]                              # (3,h,w)   ==> (h,w)，  转换为numpy，取单通道。P模式的图片必须要单通道。
+        labels = torch.unsqueeze(labels, dim=1)  # (b,h,w)   ==> (b,1,h,w)，make_grid只能处理4维的向量，三维的label必须扩充一个通道的维度
+        labels = torchvision.utils.make_grid(labels, nrow=4)  # (b,1,h,w) ==> (3,h,w), 单通道会被扩充到3通道。
+        labels = labels.numpy()[0]  # (3,h,w)   ==> (h,w)，  转换为numpy，取单通道。P模式的图片必须要单通道。
 
-        output_col = utils.colorize_mask(labels, train_conf['num_classes'])   # 转换为P模式的Image，并且换上对应的调试板，将其可视化。
-        output_col.save('demo_img/gta5/GTA5_Demo_label_{}.png'.format(idx))
+        output_col = utils.colorize_mask(labels, train_conf['num_classes'])  # 转换为P模式的Image，并且换上对应的调试板，将其可视化。
+        output_col.save('datasets/demo_img/gta5/GTA5_Demo_label_{}.png'.format(idx))
 
         if idx > 2:
             break
+
+
+if __name__ == '__main__':
+    test_dataset()
