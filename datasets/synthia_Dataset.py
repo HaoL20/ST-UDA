@@ -17,6 +17,7 @@ from utils import utils
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+imageio.plugins.freeimage.download()
 
 class SYNTHIA_Dataset(data.Dataset):
     def __init__(self, image_dir, label_dir, size, num_classes=16, ignore_label=-1, split='train',
