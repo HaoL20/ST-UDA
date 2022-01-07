@@ -101,3 +101,7 @@ def poly_lr_scheduler(optimizer, init_lr=None, iter=None,
     optimizer.param_groups[0]["lr"] = new_lr
     if len(optimizer.param_groups) == 2:
         optimizer.param_groups[1]["lr"] = 10 * new_lr
+
+def apply_dropout(m):
+    if type(m) == torch.nn.Dropout2d:
+        m.train()

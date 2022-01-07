@@ -1,14 +1,10 @@
 import os
-
 import yaml
-import torch
-import torch.nn as nn
+import shutil
 import random
 import logging
-import numpy as np
+import torch.nn as nn
 from tqdm import tqdm
-from math import ceil
-
 from tensorboardX import SummaryWriter
 
 from utils.eval import Eval
@@ -17,14 +13,19 @@ from utils.utils import *
 
 class Trainer:
     def __init__(self, conf, device, logger):
+
         self.conf = conf
         self.device = device
         self.logger = logger
         self.exp_name = conf['exp_name']
         self.model_name = conf['source_data_name'] + '_2_' + conf['target_data_name']    # 保存的模型前缀
         self.num_classes = conf['num_classes']
+        self.checkpoint_dir = conf['checkpoint_dir']    # checkpoint_dir = log_dir + exp_name
 
-        self.checkpoint_dir = conf['checkpoint_dir']
+        self.round_num = conf['round_num']              # round次数，每一轮新的round生成一次伪标签
+        self.current_round = conf['init_round']         # 当前round
+        self.epoch_each_round = ['epoch_each_round']    # 每一轮的epoch数
+        self.use_uncertainty = conf['use_uncertainty']   # 是否使用不确定性估计
 
         self.current_MIoU = 0
         self.best_MIou = 0
@@ -33,6 +34,8 @@ class Trainer:
         self.current_iter = 0
         self.best_iter = None
 
+        self.pseudo_label_dir = None
+        self.epoch_num = None
         # set TensorboardX
         self.writer = SummaryWriter(self.checkpoint_dir)
 
@@ -57,13 +60,10 @@ class Trainer:
         self.source_train_loader, self.source_val_loader = get_dataloader(conf, 'source')
         self.target_train_loader, self.target_val_loader = get_dataloader(conf, 'target')
 
-        self.train_iterations = (len(self.source_train_loader.dataset) + conf['batch_size']) // conf['batch_size']  # 一个epoch的迭代次数
-        self.train_iterations = min(conf['iter_epoch'], self.train_iterations)  # 一个epoch的迭代次数最多不能超过iter_epoch
-
-        if conf['iter_stop'] is None:  # 总epoch数量
-            self.num_epoch = ceil(conf['iter_max'] / self.train_iterations)
-        else:
-            self.num_epoch = ceil(conf['iter_stop'] / self.train_iterations)
+        # 迭代次数定为  目标域  的一个epoch的迭代次数
+        self.train_iterations = (len(self.target_train_loader.dataset) + conf['batch_size']) // conf['batch_size']  # 一个epoch的迭代次数
+        self.train_iterations = min(conf['iter_epoch'], self.train_iterations)                                      # 一个epoch的迭代次数最多不能超过iter_epoch
+        self.iter_max = self.train_iterations * self.epoch_each_round * self.round_num                              # 总迭代次数
 
     def main(self):
         # display config details
@@ -84,14 +84,114 @@ class Trainer:
                 self.conf['pretrained_model_file'] = os.path.join(self.conf['checkpoint_dir'], self.model_name + 'best.pth')
             self.load_checkpoint(self.conf['pretrained_model_file'])
 
+        self.logger.info('Iter max: {} \nNumber of iterations: {}'.format(self.iter_max, self.dataloader.num_iterations))
+
         self.train()
         self.writer.close()
+
+    def train_round(self):
+        for _ in range(self.current_round, self.round_num):
+            self.logger.info("\n############## Begin {}/{} Round! #################\n".format(self.current_round + 1, self.round_num))
+            self.logger.info("epoch_each_round: {}".format(self.epoch_each_round))
+
+            self.epoch_num = (self.current_round + 1) * self.epoch_each_round                                       # 当前epoch数
+            self.pseudo_label_dir = os.path.join(self.checkpoint_dir, 'pseudo-label', str(self.current_round))      # 伪标签路径
+
+            if not os.path.exists(self.pseudo_label_dir):                                                           # 新建伪标签文件夹
+                self.gen_pseudo_label()
+            else:
+                self.logger.info(self.pseudo_label_dir + 'exists! Skip gen pseudo label')                           # 伪标签文件夹已存在，则跳过
+            self.updata_target_dataloader()  # 更新目标域的dataloader
+
+    def gen_pseudo_label(self):
+        tqdm_epoch = tqdm(self.target_train_loader, total=self.target_train_iterations, desc="Generate pseudo label Epoch-{}-total-{}".format(self.current_epoch + 1, self.epoch_num))
+        self.target_train_loader.dataset.switch_to_gen_pseudo()         # 切换到伪标签模式（关闭random_mirror）
+        self.logger.info("Generate pseudo label...")
+        self.model.eval()
+
+        self.model.apply(apply_dropout)
+
+        f_pass = 10 if self.use_uncertainty else 1          # 不确定性计算，前向传播10次。否则前向传播一次
+
+        for image, _, id_label in tqdm_epoch:
+
+            # 预测结果和方差计算
+            image = image.to(self.device)
+            with torch.no_grad():
+                cur_out_prob = []                                   # 输出的置信度
+                for _ in range(f_pass):                             # 前向传播 f_pass 次
+                    preds, _ = self.model(image)                    # 前向传播，返回prediction, feature
+                    probs = torch.softmax(preds, dim=1)             # 转换为置信度 b,c,h,w
+                    cur_out_prob.append(probs)                      #
+            if f_pass == 1:
+                out_prob = cur_out_prob[0]
+                max_value, max_idx = torch.max(out_prob, dim=1)     # 最大的预测值和对应的索引      b,h,w
+                max_std = torch.zeros_like(max_value)
+            else:
+                out_prob = torch.stack(cur_out_prob)                # 当前批次的预测样本堆叠起来 f_pass,b,c,h,w
+                out_prob_std = torch.std(out_prob, dim=0)           # 正伪标签的方差 b,c,h,w
+                out_prob_mean = torch.mean(out_prob, dim=0)         # 正伪标签的平均置信度 b,c,h,w
+                max_value, max_idx = torch.max(out_prob_mean, dim=1)  # 最大的预测值和对应的索引      b,h,w
+                max_std = out_prob_std.gather(1, max_idx.unsqueeze(dim=1)).squeeze(1)  # 最大预测值的方差         b,h,w
+
+            # 阈值计算
+            thre_conf = []  # 置信度阈值, 长度为num_classes的list
+            thre_std = []  # 方差阈值(不确定性阈值)
+            for i in range(self.num_classes):
+                mask_i = (max_idx == i)                 # 预测为类别 i 的掩码
+                num_pixel = max_value[mask_i].size(0)   # 类别 i 的像素数量
+                if num_pixel == 0:                      # 类别 i 不存在，阈值设置为 0
+                    thre_conf.append(0)
+                    thre_std.append(0)
+                else:
+                    mid = num_pixel // 2                # 类别 i 的像素数量的一半
+                    half = num_pixel // 4               # 类别 i 的像素数量的四分之一
+
+                    # 类别 i 所有像素点置信度排序后，取中间值和 0.9 两者的最小值作为置信度阈值
+                    max_value_i, _ = torch.sort(max_value[mask_i])
+                    thre_conf.append(min(0.9, max_value_i[mid]))
+
+                    # 类别 i 所有像素点置信度排序后，取 1/4 值和 0.01 两者的最大值作为方差阈值
+                    max_std_i, _ = torch.sort(max_std[mask_i])
+                    thre_std.append(max(0.01, max_std_i[half]))
+
+            # 通过切片的操作，计算每个像素点对应 索引 的阈值，例如：某像素点索引为 4, 通过切片操作可以获取 thre_conf 中第4个元素的阈值。
+            thre_conf = torch.tensor(thre_conf).cuda()[max_idx].detach()  # (b,h,w)
+            thre_std = torch.tensor(thre_std).cuda()[max_idx].detach()    # (b,h,w)
+
+            if self.use_uncertainty:  # 大于置信度阈值，小于不确定性阈值的像素点选择为伪标签
+                selected_idx = (max_value >= thre_conf) * (max_std < thre_std)
+            else:
+                selected_idx = max_value >= thre_conf
+            unselected_idx = ~selected_idx  # 取反，选择所以不满足条件的像素点
+
+            pseudo_label = max_idx.clone().cpu()
+            pseudo_label[unselected_idx] = self.ignore_index        # 未被选择的像素赋值为ignore_index
+
+            batch_size = max_idx.size(0)
+            for b in range(batch_size):
+                label = pseudo_label[b]                             # 需要保存的伪标签
+                output = np.asarray(label, dtype=np.uint8)          # 转换为图片
+                output = Image.fromarray(output)
+
+                pseudo_name = id_label[b]                           # 标签文件相对路径名
+                save_path = self.pseudo_label_dir + pseudo_name     # 伪标签的保存路径
+
+                # 保存伪标签
+                save_dir = os.path.dirname(save_path)
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+                output.save(save_path)
+
+    def updata_target_dataloader(self):                           # 更新训练集的
+        self.conf['cityscapes']['label_dir'] = self.pseudo_label_dir
+        self.target_train_loader = get_city_dataloader(self.conf, 'train')
 
     def train(self):
 
         for _ in tqdm(range(self.current_epoch, self.num_epoch), desc="Total {} epochs".format(self.num_epoch)):
             self.current_epoch += 1
-
+            
             # train
             self.train_one_epoch()  # 训练一个epoch
 
@@ -135,11 +235,11 @@ class Trainer:
             poly_lr_scheduler(self.optimizer, self.conf['lr'], self.current_iter, self.conf['iter_max'], self.conf['poly_power'])
             self.writer.add_scalar('learning_rate', self.optimizer.param_groups[0]["lr"], self.current_iter)
 
-            self.optimizer.zero_grad()  # 梯度清零
-            preds, _ = self.model(images)  # 前向传播，返回prediction, feature
-            cur_loss = self.loss(preds, labels)  # 交叉熵损失函数
-            cur_loss.backward()  # 反向传播
-            self.optimizer.step()  # 参数更新
+            self.optimizer.zero_grad()              # 梯度清零
+            preds, _ = self.model(images)           # 前向传播，返回prediction, feature
+            cur_loss = self.loss(preds, labels)     # 交叉熵损失函数
+            cur_loss.backward()                     # 反向传播
+            self.optimizer.step()                   # 参数更新
 
             # 损失计算
             if np.isnan(float(cur_loss.item())):
@@ -148,11 +248,9 @@ class Trainer:
             train_loss_avg = sum(train_loss) / len(train_loss)
             self.writer.add_scalar('train_loss', train_loss_avg, self.current_epoch)
 
+            arg_preds = torch.argmax(preds, dim=1)                      # 预测结果，(b,c,h,w) ==> (b,h,w)
             # 更新混淆矩阵
-            preds = preds.data.cpu().numpy()  # size：(b,c,h,w)
-            labels = labels.cpu().numpy()  # size: (b,h,w)
-            arg_preds = np.argmax(preds, axis=1)  # size: (b,h,w)
-            self.Eval.add_batch(labels, arg_preds)
+            self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
 
             self.current_iter += 1  # 更新总迭代次数
 
@@ -162,7 +260,7 @@ class Trainer:
 
             # epoch迭代结束
             if batch_idx == self.train_iterations - 1:
-                self.save_images(images, labels, arg_preds)  # 可视化最后一次迭代的图片
+                self.save_images(images, labels, arg_preds, 'source_train')  # 可视化最后一次迭代的图片
                 tqdm.write("The average loss of train epoch-{}-:{}".format(self.current_epoch, train_loss_avg))  # 打印最后一次迭代的loss
                 tqdm_epoch.close()
                 break
@@ -184,15 +282,17 @@ class Trainer:
                 # unpack data
                 images, labels, id_labels = data
 
-                images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,h,w)
-                labels = torch.squeeze(labels, 1)  # (b,h,w) ==> (b,1, h,w)
+                b, H, W = labels.shape
+                images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)    # (b,3,h,w), (b,H,W) val评估的时候，需要原图大小的标签
+                labels = torch.squeeze(labels, 1)                                                           # (b,H,W) ==> (b,1,H,W)
 
-                preds, _ = self.model(images)  # prediction, feature
-                preds = preds.data.cpu().numpy()
-                labels = labels.cpu().numpy()
-                arg_preds = np.argmax(preds, axis=1)
+                preds, _ = self.model(images)                                                               # prediction, feature
+                arg_preds = torch.argmax(preds, dim=1, keepdim=True)                                        # 预测类别, (b,c,h,w) ==> (b,1,h,w) (要对h，w上采样，interpolate输入必须为4维。因此要keepdim)
+                arg_preds = arg_preds.to(torch.float32)                                                     # interpolate 不能处理int类型
+                arg_preds = nn.functional.interpolate(arg_preds, size=(H, W), mode='nearest')               # (b,1,h,w) ==> (b,1,H,W) 上采样
+                arg_preds = arg_preds.squeeze(dim=1).to(torch.int64)                                        # (b,1,H,W) ==> (b,H,W), 和labels数据类型一致
 
-                self.Eval.add_batch(labels, arg_preds)
+                self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
 
             #  可视化最后一次迭代的图片
             self.save_images(images, labels, arg_preds, name)
@@ -205,8 +305,8 @@ class Trainer:
 
         # show train image on tensorboard
         images_inv = inv_preprocess(images.clone().cpu())
-        labels_colors = decode_labels(torch.tensor(labels), self.num_classes)
-        preds_colors = decode_labels(torch.tensor(arg_preds), self.num_classes)
+        labels_colors = decode_labels(labels, self.num_classes)
+        preds_colors = decode_labels(arg_preds, self.num_classes)
         self.writer.add_image('{}/Images'.format(name), images_inv, self.current_epoch)
         self.writer.add_image('{}/Labels'.format(name), labels_colors, self.current_epoch)
         self.writer.add_image('{}/preds'.format(name), preds_colors, self.current_epoch)
@@ -291,6 +391,9 @@ def init_config(config_path):
         print('Missing parent folder in path:  {}'.format(checkpoint_dir))
         exit()
 
+    # save config
+    shutil.copy(config_path, checkpoint_dir)
+
     # Device configure
     if torch.cuda.is_available():
         os.environ["CUDA_VISIBLE_DEVICES"] = train_conf['gpu_id']
@@ -310,12 +413,26 @@ def init_config(config_path):
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-    # set seed
+    # 保证可复现性
+
     random.seed(train_conf['seed'])
     np.random.seed(train_conf['seed'])
-    torch.random.manual_seed(train_conf['seed'])
-    torch.backends.cudnn.benchmark = True
 
+    torch.random.manual_seed(train_conf['seed'])
+    torch.manual_seed(train_conf['seed'])  # 为CPU设置随机种子
+    torch.cuda.manual_seed(train_conf['seed'])  # 为当前GPU设置随机种子
+    torch.cuda.manual_seed_all(train_conf['seed'])  # 为所有GPU设置随机种子
+
+    torch.backends.cudnn.benchmark = True
+    os.environ['PYTHONHASHSEED'] = str(train_conf['seed'])
+
+    # torch.backends.cudnn.deterministic = True
+    # # torch.backends.cudnn.benchmark = False
+    # # 可复现设计细节参考：
+    # # https://zhuanlan.zhihu.com/p/73711222
+    # # https://blog.csdn.net/weixin_42587961/article/details/109363698
+    # # https://www.jianshu.com/p/1b9e18146045
+    # # https://www.it610.com/article/1293854112777052160.htm
     return train_conf, device, logger
 
 
