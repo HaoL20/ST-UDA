@@ -1,29 +1,27 @@
 train: # 训练
   # Path related arguments
-  exp_name: 'gta5_vgg'
-  log_dir: './log/train/source_only/gta5'
-  checkpoint_dir: ''                            # checkpoint_dir = log_dir + exp_name
+  checkpoint_dir: './log/train/source_only/gta5/gta5_vgg' # checkpoint_dir = log_dir + exp_name
 
   # Model related arguments
   backbone: 'vgg16'
-  batch_size: 1
-  pretrained_model_file: None                 # 预训练模型路径（不是imagenet预训练模型）
+  warmup_model_file: None                     # 预热模型路径
   imagenet_pretrained: True                   # 是否用imagenet预训练模型初始化模型
 
   # train related arguments
   seed: 12345                                 # 随机数种子，用于实验复现
   gpu_id: "0"
+  batch_size: 1
   num_workers: 2
-  pin_memory: False                            # 当计算机的内存充足的时候，可以设置pin_memory=True。当系统卡住，或者交换内存使用过多的时候，设置pin_memory=False。
-  iter_max: 200000                            # the max num of iteration
-  iter_stop: 100000                           # the early stop step
-  iter_epoch: 5000                            # the num of iteration in one epoch
-  iter_show_loss: 1000                        # the num of iteration of print train loss
+  pin_memory: True                            # 当计算机的内存充足的时候，可以设置pin_memory=True。当系统卡住，或者交换内存使用过多的时候，设置pin_memory=False。
+  iter_max: 200000                            # 最大的总迭代次数，影响学习率的更新
+  iter_stop: 100000                           # 迭代多少次以后early stop
+  iter_epoch: 5000                            # 一个epoch的最大迭代次数
+  iter_show_loss: 1000                        # 每迭代多少次打印loss
 
   # dataset related arguments
-  source_data_name: 'gta5'                    # ['gat5', 'synthia']
+  num_classes: 19                             # gta5为19, synthia为16
+  source_data_name: 'gta5'                    # 可选：gta5, synthia
   target_data_name: 'cityscapes'              # cityscapes
-  num_classes: 19
   use_pseudo: False                           # 是否使用伪标签，只对cityscapes有用
   ignore_label: -1                            # 忽略的标签
   color_jitter: True                          # 色彩抖动数据增强
@@ -31,32 +29,29 @@ train: # 训练
   random_mirror: True                         # 随机镜像数据增强
 
   cityscapes:
-    resize: False                                                                   # 可以预先resize到指定大小，训练过程就不用resize操作（减少训练时间）
-    size: 1024,512                                                                  # cityscapes常用的尺寸
-    image_dir:    '/home/haol/code/data/cityscape_1024_512/leftImg8bit'             # RGB图像路径, 如果resize过，需要填resize后的路径
-    label_dir:                                                                      # RGB图像和label标签路径分离、方便使用伪标签的时候直接修改标签路径
-      no_resize:  '/home/haol/code/data/cityscape/gtFine'                           # 沒有resize过的标签文件路径，因为评估的时候要用原图大小的标签
-      resize:     '/home/haol/code/data/cityscape_1024_512/gtFine'
+    resize: True
+    size: 1024,512                                                            # cityscapes常用的尺寸
+    image_dir: '/home/lyc/data/cityscape/leftImg8bit'                         # RGB图像文件夹
+    label_dir: '/home/lyc/data/cityscape/gtFine'                              # label标签路径。方便在使用伪标签的时候，修改为伪标签路径
 
   gta5:
-    resize: False
-    size: 1280,720                                                                  # gta5常用尺寸
-    use_trans_image: False                                                          # 是否使用图像翻译后GTA5数据集
-    image_dir:        '/home/haol/code/data/GTA5_1280_720/images'                   # GTA5图像文件夹
-    trans_image_dir:  '/home/haol/data/Dataset/公开数据集/gta5_deeplab/images'        # 图像翻译后GTA5图像文件夹，use_trans_image为False的话可以  忽略
-    label_dir:                                                                      # GTA5标签文件夹
-      no_resize:      '/home/haol/code/data/GTA5/labels'
-      resize:         '/home/haol/code/data/GTA5_1280_720/labels'
+    resize: True
+    size: 1280,720                                                            # gta5常用尺寸
+    image_dir: '/home/lyc/data/GTA5/images'                                   # RGB图像文件夹
+    label_dir: '/home/lyc/data/GTA5/labels'                                   # label标签路径
+
+    use_trans_image: False                                                    # 是否使用图像翻译后GTA5数据集
+    trans_image_dir: '/home/haol/data/Dataset/gta5_deeplab/images'            # 图像翻译的图像文件夹，如不设置不使图像翻译数据集，可以忽略
 
   synthia:
-    resize: False                                                                    # synthia原始尺寸就是1280,760
-    size: 1280,760                                                                   # synthia常用的尺寸
-    use_trans_image: False                                                           # 是否使用图像翻译后synthia数据集
-    image_dir:        '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/RGB'         # synthia图像文件夹
-    trans_image_dir:  '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/RGB'         # 图像翻译后synthia图像文件夹，use_trans_image为False的话可以   忽略
-    label_dir:                                                                       # synthia标签文件夹
-      no_resize:      '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/GT/LABELS'
-      resize:         '/home/haol/data/Dataset/公开数据集/RAND_CITYSCAPES/GT/LABELS'
+    resize: False                                                             # synthia原始尺寸就是1280,760
+    size: 1280,760
+    image_dir: '/home/lyc/data/RAND_CITYSCAPES/RGB'                           # RGB图像文件夹
+    label_dir: '/home/lyc/data/RAND_CITYSCAPES/LABELS'                        # label标签路径
+
+    use_trans_image: False                                                    # 是否使用图像翻译后GTA5数据集
+    trans_image_dir:  '/home/lyc/data/syn_deeplab/RGB'                        # 图像翻译的图像文件夹，如不设置不使图像翻译数据集，可以忽略
+
 
   # optimization related arguments
   optim: 'SGD'                                # SGD or Adam

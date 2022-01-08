@@ -13,7 +13,7 @@ import torchvision.transforms as transforms
 from PIL import Image, ImageFilter, ImageFile
 
 sys.path.append("..")
-from utils import utils
+from misc import utils
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -26,8 +26,9 @@ class SYNTHIA_Dataset(data.Dataset):
         self.size = size                        # resize大小
         self.split = split                      # train,val
         self.resize = resize                    # 是否resize
-        self.image_dir = image_dir              # 数据集图像路径，eg: /home/haol/data/Dataset/公开数据集/GTA5/images
-        self.num_classes = num_classes          # 类别数，GTA5-to-Cityscapes为19
+        self.image_dir = image_dir              # 数据集图像路径
+        self.label_dir = label_dir              # 数据集标签路径
+        self.num_classes = num_classes          # 类别数，SYNTHIA-to-Cityscapes为16
         self.ignore_label = ignore_label        # 忽略的标签序号
 
         # 图像增强
@@ -36,10 +37,7 @@ class SYNTHIA_Dataset(data.Dataset):
         self.gaussian_blur = gaussian_blur      # 高斯模糊
 
         self.is_train = (self.split == 'train')
-        if self.is_train and self.resize is False:
-            self.label_dir = label_dir['resize']      # 如果数据集已经resize过，并且是训练阶段的话，用resize后的标签路径
-        else:
-            self.label_dir = label_dir['no_resize']     # 如果是测试阶段，或者是没有resize过的话，用no_resize的标签路径
+
 
         # SYNTHIA-to-Cityscapes 实验中，只考虑共享的16类
         self.id_to_train_id = {1: 9, 2: 2, 3: 0, 4: 1, 5: 4, 6: 8, 7: 5, 8: 12, 9: 7,
@@ -127,11 +125,11 @@ def get_syn_dataloader(conf, split):
     return data_loader
 
 
-def test_dataset():
+def dataset_demo():
     os.chdir('..')  # 改变当前工作目录到上一级目录(项目目录)
 
     # Reading configuration file
-    config = yaml.load(open("config/config_train_source.yaml", "r"), Loader=yaml.FullLoader)
+    config = yaml.load(open("config/config_train_source.yaml", "r", encoding='utf-8'), Loader=yaml.FullLoader)
     train_conf = config['train']
     conf_syn = train_conf['synthia']
 
@@ -167,4 +165,4 @@ def test_dataset():
 
 
 if __name__ == '__main__':
-    test_dataset()
+    dataset_demo()
