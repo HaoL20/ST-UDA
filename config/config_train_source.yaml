@@ -1,15 +1,14 @@
 train: # 训练
   # Path related arguments
-  checkpoint_dir: './log/train/source_only/gta5/gta5_vgg' # checkpoint_dir = log_dir + exp_name
+  checkpoint_dir: './log/train/source_only/synthia/synthia_resnet101'
 
   # Model related arguments
-  backbone: 'vgg16'
+  backbone: 'resnet101'                           # vgg16 resnet101
   warmup_model_file: None                     # 预热模型路径
   imagenet_pretrained: True                   # 是否用imagenet预训练模型初始化模型
 
   # train related arguments
   seed: 12345                                 # 随机数种子，用于实验复现
-  gpu_id: "0"
   batch_size: 1
   num_workers: 2
   pin_memory: True                            # 当计算机的内存充足的时候，可以设置pin_memory=True。当系统卡住，或者交换内存使用过多的时候，设置pin_memory=False。
@@ -19,8 +18,8 @@ train: # 训练
   iter_show_loss: 1000                        # 每迭代多少次打印loss
 
   # dataset related arguments
-  num_classes: 19                             # gta5为19, synthia为16
-  source_data_name: 'gta5'                    # 可选：gta5, synthia
+  num_classes: 16                             # gta5为19, synthia为16
+  source_data_name: 'synthia'                 # 可选：gta5, synthia
   target_data_name: 'cityscapes'              # cityscapes
   use_pseudo: False                           # 是否使用伪标签，只对cityscapes有用
   ignore_label: -1                            # 忽略的标签
@@ -37,8 +36,8 @@ train: # 训练
   gta5:
     resize: True
     size: 1280,720                                                            # gta5常用尺寸
-    image_dir: '/home/lyc/data/GTA5/images'                                   # RGB图像文件夹
-    label_dir: '/home/lyc/data/GTA5/labels'                                   # label标签路径
+    image_dir: '/home/lyc/data/gta5/images'                                   # RGB图像文件夹
+    label_dir: '/home/lyc/data/gta5/labels'                                   # label标签路径
 
     use_trans_image: False                                                    # 是否使用图像翻译后GTA5数据集
     trans_image_dir: '/home/haol/data/Dataset/gta5_deeplab/images'            # 图像翻译的图像文件夹，如不设置不使图像翻译数据集，可以忽略
@@ -47,7 +46,7 @@ train: # 训练
     resize: False                                                             # synthia原始尺寸就是1280,760
     size: 1280,760
     image_dir: '/home/lyc/data/RAND_CITYSCAPES/RGB'                           # RGB图像文件夹
-    label_dir: '/home/lyc/data/RAND_CITYSCAPES/LABELS'                        # label标签路径
+    label_dir: '/home/lyc/data/RAND_CITYSCAPES/GT/LABELS'                     # label标签路径
 
     use_trans_image: False                                                    # 是否使用图像翻译后GTA5数据集
     trans_image_dir:  '/home/lyc/data/syn_deeplab/RGB'                        # 图像翻译的图像文件夹，如不设置不使图像翻译数据集，可以忽略
