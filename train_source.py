@@ -6,7 +6,6 @@ import logging
 import torch.nn as nn
 from tqdm import tqdm
 from math import ceil
-
 from tensorboardX import SummaryWriter
 
 from misc.eval import Eval
@@ -18,7 +17,6 @@ class Trainer:
         self.conf = conf
         self.device = device
         self.logger = logger
-        self.exp_name = conf['exp_name']
         self.model_name = conf['source_data_name']  # 保存的模型前缀
         self.num_classes = conf['num_classes']
 
@@ -77,10 +75,10 @@ class Trainer:
             self.logger.info("This model will run on CPU")
 
         # load pretrained checkpoint
-        if self.conf['pretrained_model_file'] != '':
-            if os.path.isdir(self.conf['pretrained_model_file']):
-                self.conf['pretrained_model_file'] = os.path.join(self.conf['checkpoint_dir'], self.model_name + 'best.pth')
-            self.load_checkpoint(self.conf['pretrained_model_file'])
+        if self.conf['warmup_model_file'] != '':
+            if os.path.isdir(self.conf['warmup_model_file']):
+                self.conf['warmup_model_file'] = os.path.join(self.conf['checkpoint_dir'], self.model_name + 'best.pth')
+            self.load_checkpoint(self.conf['warmup_model_file'])
 
         self.train()
         self.writer.close()
@@ -280,7 +278,7 @@ def init_config(config_path):
     assert train_conf['num_classes'] == 19 if train_conf['source_data_name'] == 'gta5' else train_conf['num_classes'] == 16
 
     # checkpoint_dir configure
-    checkpoint_dir = os.path.join(train_conf['log_dir'], train_conf['exp_name'])
+    checkpoint_dir = train_conf['checkpoint_dir']
     assert not os.path.exists(checkpoint_dir), "checkpoint dir exists! rm -r {}".format(checkpoint_dir)
     try:
         os.makedirs(checkpoint_dir)
@@ -294,10 +292,8 @@ def init_config(config_path):
 
     # Device configure
     if torch.cuda.is_available():
-        os.environ["CUDA_VISIBLE_DEVICES"] = train_conf['gpu_id']
         device = torch.device('cuda')
     else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
         device = torch.device('cpu')
 
     # logger configure
