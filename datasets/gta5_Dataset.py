@@ -12,7 +12,7 @@ import torchvision.transforms as transforms
 from PIL import Image, ImageFilter, ImageFile
 
 sys.path.append("..")
-from utils import utils
+from misc import utils
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -24,7 +24,8 @@ class GTA5_Dataset(data.Dataset):
         self.size = size                        # resize大小
         self.split = split                      # train,val
         self.resize = resize                    # 是否resize
-        self.image_dir = image_dir              # 数据集图像路径，eg: /home/haol/data/Dataset/公开数据集/GTA5/images
+        self.image_dir = image_dir              # 数据集图像路径
+        self.label_dir = label_dir              # 数据集标签路径
         self.num_classes = num_classes          # 类别数，GTA5-to-Cityscapes为19
         self.ignore_label = ignore_label        # 忽略的标签序号
 
@@ -34,10 +35,6 @@ class GTA5_Dataset(data.Dataset):
         self.gaussian_blur = gaussian_blur      # 高斯模糊
 
         self.is_train = (self.split == 'train')
-        if self.is_train and self.resize is False:
-            self.label_dir = label_dir['resize']      # 如果数据集已经resize过，并且是训练阶段的话，用resize后的标签路径
-        else:
-            self.label_dir = label_dir['no_resize']     # 如果是测试阶段，或者是没有resize过的话，用no_resize的标签路径
 
         # GTA5-to-Cityscapes 实验中，只考虑共享的19类
         self.id_to_train_id = {7: 0, 8: 1, 11: 2, 12: 3, 13: 4, 17: 5,
@@ -104,6 +101,10 @@ class GTA5_Dataset(data.Dataset):
 def get_gta5_dataloader(conf, split):
     assert split in ['train', 'val']
     conf_gta5 = conf['gta5']
+
+    if conf_gta5['use_trans_image'] is True:
+        conf_gta5['image_dir'] = conf_gta5['trans_image_dir']
+
     data_set = GTA5_Dataset(split=split,
                             size=conf_gta5['size'],
                             resize=conf_gta5['resize'],
@@ -125,18 +126,14 @@ def get_gta5_dataloader(conf, split):
     return data_loader
 
 
-def test_dataset():
+def dataset_demo():
     os.chdir('..')  # 改变当前工作目录到上一级目录(项目目录)
 
     # Reading configuration file
-    config = yaml.load(open("config/config_train_source.yaml", "r"), Loader=yaml.FullLoader)
+    config = yaml.load(open("config/config_train_source.yaml", "r", encoding='utf-8'), Loader=yaml.FullLoader)
     train_conf = config['train']
     conf_gta5 = train_conf['gta5']
-
     conf_gta5['size'] = tuple(map(int, conf_gta5['size'].split(',')))  # 将size的h,w转换为int，并且组合为tuple类型
-    if conf_gta5['use_trans_image'] is True:
-        conf_gta5['image_dir'] = conf_gta5['trans_image_dir']
-
     train_loader = get_gta5_dataloader(config['train'], split='val')
     if os.path.exists('datasets/demo_img/gta5/') is False:
         os.makedirs('datasets/demo_img/gta5/')
@@ -153,9 +150,9 @@ def test_dataset():
         img.save('datasets/demo_img/gta5/GTA5_Demo_{}.jpg'.format(idx))
 
         # 可视化标签
-        labels = torch.unsqueeze(labels, dim=1)  # (b,h,w)   ==> (b,1,h,w)，make_grid只能处理4维的向量，三维的label必须扩充一个通道的维度
-        labels = torchvision.utils.make_grid(labels, nrow=4)  # (b,1,h,w) ==> (3,h,w), 单通道会被扩充到3通道。
-        labels = labels.numpy()[0]  # (3,h,w)   ==> (h,w)，  转换为numpy，取单通道。P模式的图片必须要单通道。
+        labels = torch.unsqueeze(labels, dim=1)                 # (b,h,w)   ==> (b,1,h,w)，make_grid只能处理4维的向量，三维的label必须扩充一个通道的维度
+        labels = torchvision.utils.make_grid(labels, nrow=4)    # (b,1,h,w) ==> (3,h,w), 单通道会被扩充到3通道。
+        labels = labels.numpy()[0]                              # (3,h,w)   ==> (h,w)，  转换为numpy，取单通道。P模式的图片必须要单通道。
 
         output_col = utils.colorize_mask(labels, train_conf['num_classes'])  # 转换为P模式的Image，并且换上对应的调试板，将其可视化。
         output_col.save('datasets/demo_img/gta5/GTA5_Demo_label_{}.png'.format(idx))
@@ -165,4 +162,4 @@ def test_dataset():
 
 
 if __name__ == '__main__':
-    test_dataset()
+    dataset_demo()
