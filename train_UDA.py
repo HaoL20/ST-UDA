@@ -7,8 +7,8 @@ import torch.nn as nn
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 
-from utils.eval import Eval
-from utils.utils import *
+from misc.eval import Eval
+from misc.utils import *
 
 
 class Trainer:
