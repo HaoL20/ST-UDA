@@ -57,7 +57,7 @@ class Trainer:
         self.train_iterations = min(conf['iter_epoch'], self.train_iterations)  # 一个epoch的迭代次数最多不能超过iter_epoch
 
         if conf['iter_stop'] is None:  # 总epoch数量
-            self.num_epoch = ceil(conf['iter_max'] / self.train_iterations)
+            self.num_epoch = ceil(conf['iter_total'] / self.train_iterations)
         else:
             self.num_epoch = ceil(conf['iter_stop'] / self.train_iterations)
 
@@ -128,7 +128,7 @@ class Trainer:
             labels = torch.squeeze(labels, 1)  # (b,h,w) ==> (b,1, h,w)
 
             # 更新学习率
-            poly_lr_scheduler(self.optimizer, self.conf['lr'], self.current_iter, self.conf['iter_max'], self.conf['poly_power'])
+            poly_lr_scheduler(self.optimizer, self.conf['lr'], self.current_iter, self.conf['iter_total'], self.conf['poly_power'])
             self.writer.add_scalar('learning_rate', self.optimizer.param_groups[0]["lr"], self.current_iter)
 
             self.optimizer.zero_grad()  # 梯度清零

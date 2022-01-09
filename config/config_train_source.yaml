@@ -12,7 +12,7 @@ train: # 训练
   batch_size: 1
   num_workers: 2
   pin_memory: True                            # 当计算机的内存充足的时候，可以设置pin_memory=True。当系统卡住，或者交换内存使用过多的时候，设置pin_memory=False。
-  iter_max: 200000                            # 最大的总迭代次数，影响学习率的更新
+  iter_total: 200000                          # 最大的总迭代次数，影响学习率的更新
   iter_stop: 100000                           # 迭代多少次以后early stop
   iter_epoch: 5000                            # 一个epoch的最大迭代次数
   iter_show_loss: 1000                        # 每迭代多少次打印loss
