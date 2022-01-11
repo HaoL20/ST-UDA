@@ -131,33 +131,35 @@ class Trainer:
             poly_lr_scheduler(self.optimizer, self.conf['lr'], self.current_iter, self.conf['iter_total'], self.conf['poly_power'])
             self.writer.add_scalar('learning_rate', self.optimizer.param_groups[0]["lr"], self.current_iter)
 
-            self.optimizer.zero_grad()  # 梯度清零
-            preds, _ = self.model(images)  # 前向传播，返回prediction, feature
-            cur_loss = self.loss(preds, labels)  # 交叉熵损失函数
-            cur_loss.backward()  # 反向传播
-            self.optimizer.step()  # 参数更新
+            self.optimizer.zero_grad()                  # 梯度清零
+            preds, _ = self.model(images)               # 前向传播，返回prediction, feature
+            cur_loss = self.loss(preds, labels)         # 交叉熵损失函数
+            cur_loss.backward()                         # 反向传播
+            self.optimizer.step()                       # 参数更新
 
-            # 损失计算
+            # 损失可视化
             if np.isnan(float(cur_loss.item())):
                 raise ValueError('Loss is nan during training...')
+            self.writer.add_scalar('train_loss', cur_loss, self.current_iter)
+
+            # 更新混淆矩阵
+            arg_preds = torch.argmax(preds, dim=1)                      # 预测结果，(b,c,h,w) ==> (b,h,w)
+            self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
+
+            # 计算当前 epoch 的平均 loss
             train_loss.append(cur_loss.item())
             train_loss_avg = sum(train_loss) / len(train_loss)
-            self.writer.add_scalar('train_loss', train_loss_avg, self.current_epoch)
-
-            arg_preds = torch.argmax(preds, dim=1)                      # 预测结果，(b,c,h,w) ==> (b,h,w)
-            # 更新混淆矩阵
-            self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
 
             self.current_iter += 1  # 更新总迭代次数
 
-            # 打印loss
+            # 打印当前 loss
             if batch_idx % self.conf['iter_show_loss'] == 0:
                 self.logger.info("The train loss of epoch-{}-batch-{}:{}".format(self.current_epoch, batch_idx, cur_loss.item()))
 
-            # epoch迭代结束
+            # epoch 迭代结束
             if batch_idx == self.train_iterations - 1:
                 self.save_images(images, labels, arg_preds, 'source_train')  # 可视化最后一次迭代的图片
-                tqdm.write("The average loss of train epoch-{}-:{}".format(self.current_epoch, train_loss_avg))  # 打印最后一次迭代的loss
+                tqdm.write("The average loss of train epoch-{}-:{}".format(self.current_epoch, train_loss_avg))  # 打印当前 epoch 的平均 loss
                 tqdm_epoch.close()
                 break
 
