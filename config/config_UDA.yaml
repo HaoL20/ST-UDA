@@ -24,14 +24,15 @@ train: # 训练
   # UDA related arguments
   round: 5                                    # 迭代的轮数。每一轮会生成一次新的伪标签
   round_num: 2                                # 每轮迭代的次数
+  deque_capacity_factor: 1.0                  #
   thing_type: 'Entropy'                       # ['Entropy', 'Squares','Cosine']
-  em_type: 'Entropy'                          # ['Entropy', 'Squares']
+  entropy_type: 'Entropy'                     # ['Entropy', 'Squares', 'FocalEntropy']
   norm_order: 1                               # L1、L2...
   lambda_things: 1                            # things alignment loss 权重
   lambda_stuff: 1                             # stuff alignment loss 权重
   lambda_entropy: 1                           #
-  centroid_smoothing: 0.9                        # 类中心移动指数平均的平滑系数
-  no_uncertainty: True                             # 是否使用不确定性伪标签
+  centroid_smoothing: 0.9                     # 类中心移动指数平均的平滑系数
+  use_uncertainty: True                       # 是否使用不确定性伪标签
 
   # dataset related arguments
   source_data_name: 'gta5'                    # ['gat5', 'synthia']

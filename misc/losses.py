@@ -1,14 +1,13 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as functional
 import numpy as np
-from collections import deque
 
 
-class feat_reg_ST_loss(nn.Module):
+class STLoss(nn.Module):
 
     def __init__(self, ignore_index=-1, num_class=19, deque_capacity_factor=2.0, feat_channel=2048, device='cuda'):
-        super(feat_reg_ST_loss, self).__init__()
+        super(STLoss, self).__init__()
 
         if num_class == 19:  # GTA5
             self.BG_LABEL = [0, 1, 2, 3, 4, 8, 9, 10]
@@ -59,7 +58,7 @@ class feat_reg_ST_loss(nn.Module):
         self.deque_capacities = [int(capacity * deque_capacity_factor) for capacity in self.deque_capacities]  # 源域特征向量队列容量, 一共有C_fg个队列，每个队列都有自己的容量
         self.remaining_capacities = self.deque_capacities.copy()  # 队列的剩余容量
         self.source_feat_deques = [torch.full(dtype=torch.float32, fill_value=float('Inf'), size=(self.deque_capacities[i], self.F)).to('cuda') for i in range(self.C_fg)]
-        self.target_feat_cur = [None] * self.C_fg  # 当前批次目标域特征向量
+        self.target_feat_cur = [torch.tensor([float("Inf")])] * self.C_fg  # 当前批次目标域特征向量
 
     def dist(self, tensor, dim=None):
         if isinstance(self.dist_func, int):  # dist_func == 1， L1距离；ist_func == 2， L2距离.....
@@ -67,16 +66,10 @@ class feat_reg_ST_loss(nn.Module):
         else:
             return self.dist_func(tensor)  # dist_func是距离函数，例如，L1loss(),MSEloss()
 
-    ## PRE-PROCESSING ###
     def feature_processing(self, feat, softmax, label, domain, argmax_dws_type='bilinear'):
-        """
-        Process feature and softmax tensors in order to get downsampled and 2D-shaped representations
-        :param feat: feature tensor (B x F x h x w)
-        :param label: Ground truth (B x H x W)
-        :param argmax_dws_type: direct 'nearest' or 'bilinear' through from softmax
-        """
         self.B = softmax.size(0)
         assert self.F == feat.size(1)
+
         # 获取源域、目标域的特征图、预测结果的尺度
         if domain == 'source':
             self.Hs, self.Ws = softmax.size(2), softmax.size(3)
@@ -93,13 +86,13 @@ class feat_reg_ST_loss(nn.Module):
         # 预测结果argmax下采样
         if argmax_dws_type == 'nearest':
             peak_values, argmax = torch.max(softmax, dim=1)  # size B x H x W
-            argmax_dws = torch.squeeze(F.interpolate(torch.unsqueeze(argmax.float(), dim=1), size=(h, w), mode='nearest'), dim=1)  # size B x h x w
+            argmax_dws = torch.squeeze(functional.interpolate(torch.unsqueeze(argmax.float(), dim=1), size=(h, w), mode='nearest'), dim=1)  # size B x h x w
         else:
-            softmax_dws = F.interpolate(softmax, size=(h, w), mode='bilinear', align_corners=True)  # size B x C x h x w
+            softmax_dws = functional.interpolate(softmax, size=(h, w), mode='bilinear', align_corners=True)  # size B x C x h x w
             peak_values_dws, argmax_dws = torch.max(softmax_dws, dim=1)  # size B x h x w
 
         # 标签下采样
-        label_dws = torch.squeeze(F.interpolate(torch.unsqueeze(label.float(), dim=1), size=(h, w), mode='nearest'), dim=1)  # size B x h x w， GT下采样到和特征图一样大
+        label_dws = torch.squeeze(functional.interpolate(torch.unsqueeze(label.float(), dim=1), size=(h, w), mode='nearest'), dim=1)  # size B x h x w， GT下采样到和特征图一样大
 
         # 分离计算图
         argmax_dws = argmax_dws.detach()
@@ -123,10 +116,8 @@ class feat_reg_ST_loss(nn.Module):
             self.target_label = label_dws  # N,  目标域补全伪标签
 
     def computer_stuff(self, centroids_smoothing=-1):
-        """
-        背景类：计算源域和目标域的类中心，执行对比学习
-        :param centroids_smoothing: if > 0 new centroids are updated over avg past ones
-        """
+
+        # 背景类：计算源域和目标域的类中心，执行对比学习
         centroid_list_source_BG, centroid_list_target_BG = [], []  # 保存每一个类的平均特征向量，列表大小C_BG(背景类的数量)
 
         # 计算源域和目标域的背景（stuff）的中心
@@ -168,7 +159,7 @@ class feat_reg_ST_loss(nn.Module):
         # 1/oc = min(N/Nc，μ）
         source_N = sum(self.source_num_pixel_BG)
         target_N = sum(self.target_num_pixel_BG)
-        #
+
         source_Oc_inverse = [min(source_N / float(Nc), 10) if Nc != 0 else 10 for Nc in self.source_num_pixel_BG]
         target_Oc_inverse = [min(target_N / float(Nc), 10) if Nc != 0 else 10 for Nc in self.target_num_pixel_BG]
         source_Oc_inverse_sum = sum(source_Oc_inverse)
@@ -179,7 +170,9 @@ class feat_reg_ST_loss(nn.Module):
 
         # 指数平均移动
         if centroids_smoothing >= 0.:
-            if self.centroids_source_BG_avg is None: self.centroids_source_BG_avg = self.centroids_source_BG  # size C_BG x F
+            if self.centroids_source_BG_avg is None:
+                self.centroids_source_BG_avg = self.centroids_source_BG  # size C_BG x F
+
             # In early steps there may be no centroids for small classes, so avoid averaging with Inf values by replacing them with values of current step
             self.centroids_source_BG_avg = torch.where(self.centroids_source_BG_avg != float('inf'), self.centroids_source_BG_avg, self.centroids_source_BG)
             # In some steps there may be no centroids for some classes, so avoid averaging with Inf values by replacing them with avg values
@@ -188,7 +181,9 @@ class feat_reg_ST_loss(nn.Module):
             self.centroids_source_BG = centroids_smoothing * self.centroids_source_BG + (1 - centroids_smoothing) * self.centroids_source_BG_avg.detach()
             self.centroids_source_BG_avg = self.centroids_source_BG.detach().clone()
 
-            if self.centroids_target_BG_avg is None: self.centroids_target_BG_avg = self.centroids_target_BG  # size C_BG x F
+            if self.centroids_target_BG_avg is None:
+                self.centroids_target_BG_avg = self.centroids_target_BG  # size C_BG x F
+
             self.centroids_target_BG_avg = torch.where(self.centroids_target_BG_avg != float('inf'), self.centroids_target_BG_avg, self.centroids_target_BG)
             self.centroids_target_BG = torch.where(self.centroids_target_BG == float('inf'), self.centroids_target_BG_avg.detach(), self.centroids_target_BG)
             self.centroids_target_BG = centroids_smoothing * self.centroids_target_BG + (1 - centroids_smoothing) * self.centroids_target_BG_avg.detach()
@@ -225,7 +220,7 @@ class feat_reg_ST_loss(nn.Module):
         # 1/oc = min(N/Nc，μ）
         source_N = sum(self.source_num_pixel_FG)
         target_N = sum(self.target_num_pixel_FG)
-        source_Oc_inverse = [min(source_N / float(Nc), 10) if Nc != 0 else 10 for Nc in self.source_num_pixel_FG]   # 防止Nc过小，以及防止Nc为0
+        source_Oc_inverse = [min(source_N / float(Nc), 10) if Nc != 0 else 10 for Nc in self.source_num_pixel_FG]  # 防止Nc过小，以及防止Nc为0
         target_Oc_inverse = [min(target_N / float(Nc), 10) if Nc != 0 else 10 for Nc in self.target_num_pixel_FG]
         source_Oc_inverse_sum = sum(source_Oc_inverse)
         target_Oc_inverse_sum = sum(target_Oc_inverse)
@@ -246,8 +241,8 @@ class feat_reg_ST_loss(nn.Module):
         seen_source_target_indices = [i for i in seen_source_indices if i in seen_target_indices]
 
         # 源域和目标域的背景类中心归一化
-        centroids_source_nor = F.normalize(centroids_source[seen_source_indices], dim=1)  # size：C_seen_s * F
-        centroids_target_nor = F.normalize(centroids_target[seen_target_indices], dim=1)  # size：C_seen_t * F
+        centroids_source_nor = functional.normalize(centroids_source[seen_source_indices], dim=1)  # size：C_seen_s * F
+        centroids_target_nor = functional.normalize(centroids_target[seen_target_indices], dim=1)  # size：C_seen_t * F
 
         # 计算目标域和源域类中心相似度矩阵
         sim_matrix = torch.mm(centroids_target_nor, centroids_source_nor.t())  # C_seen_t * C_seen_s
@@ -286,16 +281,16 @@ class feat_reg_ST_loss(nn.Module):
         for i in range(self.C_fg):
             # 过滤掉源域特征向量队列的空元素
             source_feat_i = source_feat_deques[i][self.remaining_capacities[i]:]  # 源域特征向量队列，deque_len_i * F
-            target_feat_i = target_feat[i]  # 目标域特征向量，  Nt_i * F
-            weight = self.target_weight_FG[i]  # 索引i(类别i)的权重
+            target_feat_i = target_feat[i]      # 目标域特征向量，  Nt_i * F
+            weight = self.target_weight_FG[i]   # 索引i(类别i)的权重
 
-            if source_feat_i.size(0) > 0 and target_feat_i.size(0) > 0:
+            if source_feat_i.size()[0] > 0 and target_feat_i.size()[0] > 0:
                 # 有三种loss
                 if loss_type == 'Entropy':  # 最大化entropy：-p *log(p)
                     matrix = torch.mm(target_feat_i, source_feat_i.t())  # size: Nt_i * deque_len_i
                     matrix_softmax = torch.softmax(matrix, dim=1)
                     # matrix_log_softmax = torch.log_softmax(matrix, dim=1)
-                    sim_loss += -torch.mean((matrix_softmax * torch.log2(matrix_softmax+1e-30))) * weight  # matrix_log_softmax替换torch.log(matrix_softmax)可以防止溢出
+                    sim_loss += -torch.mean((matrix_softmax * torch.log2(matrix_softmax + 1e-30))) * weight  # matrix_log_softmax替换torch.log(matrix_softmax)可以防止溢出
 
                 if loss_type == 'Squares':  # 最大化：1-p^2
                     matrix = torch.mm(target_feat_i, source_feat_i.t())  # size: Nt_i * deque_len_i
@@ -304,8 +299,8 @@ class feat_reg_ST_loss(nn.Module):
 
                 if loss_type == 'Cosine':  # ③最大化余弦相识度
                     # 归一化
-                    source_feat_nor_i = F.normalize(source_feat_i, dim=1)  # size: deque_capacities_i * F
-                    target_feat_nor_i = F.normalize(target_feat_i, dim=1)  # size: Nt_i * F
+                    source_feat_nor_i = functional.normalize(source_feat_i, dim=1)  # size: deque_capacities_i * F
+                    target_feat_nor_i = functional.normalize(target_feat_i, dim=1)  # size: Nt_i * F
 
                     # 余弦相识度
                     cos_sim_matrix = torch.mm(target_feat_nor_i, source_feat_nor_i.t())  # size: Nt_i * deque_capacities_i
@@ -314,7 +309,7 @@ class feat_reg_ST_loss(nn.Module):
                     select_mask = torch.gt(cos_sim_matrix, T_cos)
 
                     # 大于阈值的元素的数量大于0，计算loss
-                    if select_mask[select_mask == True].size(0) > 0:
+                    if select_mask[select_mask is True].size(0) > 0:
                         cos_sim_matrix_select = cos_sim_matrix[select_mask]
                         sim_loss += torch.mean(1. - cos_sim_matrix_select) * weight
 
@@ -325,7 +320,7 @@ class feat_reg_ST_loss(nn.Module):
         max_pred, arg_pred = torch.max(pred_softmax, dim=1)  # values, indices  (N, H, W)
         label_ignore_mask = torch.eq(label.detach(), self.ignore_index)  # 伪标签为空的mask, (N, H, W)
         label[label_ignore_mask] = arg_pred[label_ignore_mask]  # 用预测结果补充伪标签的空缺
-        mask = (arg_pred == label)  # (N, H, W)
+        # mask = (arg_pred == label)  # (N, H, W)
 
         weights = [0.] * self.num_class
         for i, idx in enumerate(self.BG_LABEL):
@@ -336,38 +331,15 @@ class feat_reg_ST_loss(nn.Module):
         weights = torch.tensor(weights).cuda()[arg_pred].detach()  # (num_class) ==> (N, 1, H, W)
         weights = weights.expand_as(pred_softmax)  # (N, 1, H, W) ==> (N, C, H, W)
 
+        ent_loss = None
         if loss_type == 'Squares':  # 1 - p^2
-            entropy_loss = torch.mean((1 - (torch.pow(pred_softmax, 2)) * weights))
+            ent_loss = torch.mean((1 - (torch.pow(pred_softmax, 2)) * weights))
         if loss_type == 'Entropy':  # -p * log (p)
-            entropy_loss = -torch.mean((pred_softmax * torch.log2(pred_softmax+1e-30) * weights))
+            ent_loss = -torch.mean((pred_softmax * torch.log2(pred_softmax + 1e-30) * weights))
         if loss_type == 'FocalEntropy':  # -p * log (p) * (1 - p)^2
-            entropy_loss = -torch.mean((pred_softmax * torch.log2(pred_softmax+1e-30) * torch.pow(1 - pred_softmax, 2) * weights))
+            ent_loss = -torch.mean((pred_softmax * torch.log2(pred_softmax + 1e-30) * torch.pow(1 - pred_softmax, 2) * weights))
 
-        return entropy_loss
-
-    def forward(self, **kwargs):
-
-        # 特征处理
-        # 传入特征图、预测结果预测结果softmax（置信度）、GT、源域还是目标域
-        # 计算self.source_feat、self.source_label
-        alignment_params = kwargs.get('alignment_params')
-        norm_order = alignment_params['norm_order']
-        thing_type = alignment_params['thing_type']
-        em_type = alignment_params['em_type']
-        self.dist_func = norm_order
-
-        self.feature_processing(feat=kwargs.get('source_feat'), softmax=kwargs.get('source_prob'), label=kwargs.get('source_label'), domain='source')
-        self.feature_processing(feat=kwargs.get('target_feat'), softmax=kwargs.get('target_prob'), label=kwargs.get('target_label'), domain='target')
-
-        smo_coeff = kwargs['smo_coeff']
-        assert smo_coeff <= 1., 'Centroid smoothing coefficient with invalid value: {}'.format(smo_coeff)
-        self.computer_things()
-        self.computer_stuff(centroids_smoothing=smo_coeff)
-        stuff_alignment_loss = self.stuff_alignment()
-        thing_alignment_loss = self.things_alignment(loss_type=thing_type)
-        EM_loss = self.entropy_loss(pred_softmax=kwargs.get('target_prob'), label=kwargs.get('target_label'), loss_type=em_type)
-        output = {'stuff_alignment_loss': stuff_alignment_loss, 'thing_alignment_loss': thing_alignment_loss, 'EM_loss': EM_loss}
-        return output
+        return ent_loss
 
     def reset(self):
         # 每个epoch后重置关键变量
@@ -385,9 +357,33 @@ class feat_reg_ST_loss(nn.Module):
         self.source_feat_deques = [torch.full(dtype=torch.float32, fill_value=float('Inf'), size=(self.deque_capacities[i], self.F)).to('cuda') for i in range(self.C_fg)]
         self.target_feat_cur = [None] * self.C_fg  # 当前批次目标域特征向量
 
+    def forward(self, **kwargs):
 
-if __name__ == '__main__':
+        self.dist_func = kwargs['norm_order']
 
+        # 计算
+        self.feature_processing(feat=kwargs['source_feat'], softmax=kwargs['source_prob'], label=kwargs['source_label'], domain='source')
+        self.feature_processing(feat=kwargs['target_feat'], softmax=kwargs['target_prob'], label=kwargs['target_label'], domain='target')
+
+        # things stuff 计算
+        self.computer_things()
+        self.computer_stuff(centroids_smoothing=kwargs['centroid_smoothing'])
+
+        # stuff alignment loss
+        stuff_alignment_loss = self.stuff_alignment()
+
+        # thing alignment loss
+        thing_alignment_loss = self.things_alignment(loss_type=kwargs['thing_type'])
+
+        # entropy loss
+        EM_loss = self.entropy_loss(pred_softmax=kwargs.get('target_prob'), label=kwargs.get('target_label'), loss_type=kwargs['entropy_type'])
+
+        # loss dic
+        output = {'stuff_alignment_loss': stuff_alignment_loss, 'thing_alignment_loss': thing_alignment_loss, 'EM_loss': EM_loss}
+        return output
+
+
+def main():
     ignore_index = -1
     num_class = 19
     feat_channel = 1024
@@ -422,17 +418,21 @@ if __name__ == '__main__':
     mask_select = (random_t != 0)
     t_py[mask_select] = t_pred_y[mask_select]
 
-    f = feat_reg_ST_loss(feat_channel=feat_channel)
-    loss_kwargs = {}
-    alignment_params = {'norm_order': 1}
-    loss_kwargs['alignment_params'] = alignment_params
+    f = STLoss(feat_channel=feat_channel)
+    loss_kwargs = {'norm_order': 1,
+                   'source_prob': s_softmax,
+                   'target_prob': t_softmax,
+                   'source_feat': feature_s,
+                   'target_feat': feature_t,
+                   'source_label': s_y,
+                   'target_label': t_py,
+                   'thing_type': 'Cosine',
+                   'entropy_type': 'Squares',
+                   'centroid_smoothing': 0.9}
 
-    loss_kwargs['source_prob'] = s_softmax
-    loss_kwargs['target_prob'] = t_softmax
-    loss_kwargs['source_feat'] = feature_s
-    loss_kwargs['target_feat'] = feature_t
-    loss_kwargs['source_label'] = s_y
-    loss_kwargs['target_label'] = t_py
-    loss_kwargs['smo_coeff'] = 0.9
     loss = f(**loss_kwargs)
     print(loss)
+
+
+if __name__ == '__main__':
+    main()

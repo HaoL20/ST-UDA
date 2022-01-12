@@ -3,30 +3,26 @@ import yaml
 import shutil
 import random
 import logging
-import torch.nn as nn
+import torch.nn
+import torch.nn.functional
+import torch.backends.cudnn
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 
 from misc.eval import Eval
 from misc.utils import *
+from misc.losses import STLoss
+from misc.eval import computer_and_save_metric
 
 
 class Trainer:
     def __init__(self, conf, device, logger):
-
         self.conf = conf
         self.device = device
         self.logger = logger
-        self.exp_name = conf['exp_name']
-        self.model_name = conf['source_data_name'] + '_2_' + conf['target_data_name']    # 保存的模型前缀
-        self.num_classes = conf['num_classes']
-        self.checkpoint_dir = conf['checkpoint_dir']    # checkpoint_dir = log_dir + exp_name
+        self.model_name = conf['source_data_name'] + '_2_' + conf['target_data_name']  # 保存的模型前缀
 
-        self.round_num = conf['round_num']              # round次数，每一轮新的round生成一次伪标签
-        self.current_round = conf['init_round']         # 当前round
-        self.epoch_each_round = ['epoch_each_round']    # 每一轮的epoch数
-        self.use_uncertainty = conf['use_uncertainty']   # 是否使用不确定性估计
-
+        self.ignore_index = -1
         self.current_MIoU = 0
         self.best_MIou = 0
         self.best_source_MIou = 0
@@ -34,27 +30,41 @@ class Trainer:
         self.current_iter = 0
         self.best_iter = None
 
-        self.pseudo_label_dir = None
-        self.epoch_num = None
+        self.round_num = conf['round_num']                          # round 次数，每一轮新的 round 生成一次伪标签
+        self.current_round = conf['init_round']                     # 当前 round
+        self.epoch_each_round = conf['epoch_each_round']            # 每一轮的 epoch 数
+        self.epoch_num = self.round_num * self.epoch_each_round     # 总 epoch 数
+        self.use_uncertainty = conf['use_uncertainty']              # 是否使用不确定性估计
+        self.lambda_entropy = conf['lambda_entropy']                # entropy系数
+        self.lambda_stuff = conf['lambda_stuff']                    # stuff系数
+        self.lambda_things = conf['lambda_things']                  # thing系数
+        self.pseudo_label_dir = None                                # 当前round伪标签路径，设置为：checkpoint_dir/pseudo-label/current_round, 每一轮都重新生成伪标签，并且更新该路径
+
+        feat_channel = 2048 if conf['backbone'] == 'resnet101' else 1024  # 中间特征图的通道数量，resnet101为2048，vgg16为1024
+
+        self.feat_reg_ST_loss = STLoss(ignore_index=-1, num_class=conf['num_classes'],  #
+                                       deque_capacity_factor=conf['deque_capacity_factor'],
+                                       feat_channel=feat_channel, device=self.device)
+
         # set TensorboardX
-        self.writer = SummaryWriter(self.checkpoint_dir)
+        self.writer = SummaryWriter(self.conf['checkpoint_dir'])
 
         # Metric definition
-        self.Eval = Eval(self.num_classes)
+        self.eval = Eval(self.conf['num_classes'])
 
         # loss definition
-        self.loss = nn.CrossEntropyLoss(weight=None, ignore_index=-1)
+        self.loss = torch.nn.CrossEntropyLoss(weight=None, ignore_index=-1)
         self.loss.to(self.device)
 
         # model
         self.model, params = get_model(conf)
-        self.model = nn.DataParallel(self.model)
+        self.model = torch.nn.DataParallel(self.model)
         self.model.to(self.device)
 
         if conf['optim'] == "SGD":
-            self.optimizer = torch.optim.SGD(params, momentum=conf['momentum'], weight_decay=conf['weight_decay'])
+            self.optimizer = torch.optim.SGD(params, lr=self.conf['lr'], momentum=conf['momentum'], weight_decay=conf['weight_decay'])
         elif conf['optim'] == "Adam":
-            self.optimizer = torch.optim.Adam(params, betas=(conf['beta'], 0.99), weight_decay=conf['weight_decay'])
+            self.optimizer = torch.optim.Adam(params, lr=self.conf['lr'], betas=(conf['beta'], 0.99), weight_decay=conf['weight_decay'])
 
         # data loader
         self.source_train_loader, self.source_val_loader = get_dataloader(conf, 'source')
@@ -62,8 +72,8 @@ class Trainer:
 
         # 迭代次数定为  目标域  的一个epoch的迭代次数
         self.train_iterations = (len(self.target_train_loader.dataset) + conf['batch_size']) // conf['batch_size']  # 一个epoch的迭代次数
-        self.train_iterations = min(conf['iter_epoch'], self.train_iterations)                                      # 一个epoch的迭代次数最多不能超过iter_epoch
-        self.iter_max = self.train_iterations * self.epoch_each_round * self.round_num                              # 总迭代次数
+        self.train_iterations = min(conf['iter_epoch'], self.train_iterations)  # 一个epoch的迭代次数最多不能超过iter_epoch
+        self.iter_total = self.train_iterations * self.epoch_num  # 总迭代次数, 不同于train_source. 这里的iter_total是自动计算出来的
 
     def main(self):
         # display config details
@@ -84,68 +94,68 @@ class Trainer:
                 self.conf['pretrained_model_file'] = os.path.join(self.conf['checkpoint_dir'], self.model_name + 'best.pth')
             self.load_checkpoint(self.conf['pretrained_model_file'])
 
-        self.logger.info('Iter max: {} \nNumber of iterations: {}'.format(self.iter_max, self.dataloader.num_iterations))
+        self.logger.info('Iter max: {} \nNumber of iterations: {}'.format(self.iter_total, self.train_iterations))
 
         self.train()
         self.writer.close()
+        self.current_round += 1
 
-    def train_round(self):
+    def train(self):
         for _ in range(self.current_round, self.round_num):
             self.logger.info("\n############## Begin {}/{} Round! #################\n".format(self.current_round + 1, self.round_num))
             self.logger.info("epoch_each_round: {}".format(self.epoch_each_round))
+            self.pseudo_label_dir = os.path.join(self.conf['checkpoint_dir'], 'pseudo-label', str(self.current_round))  # 伪标签路径
 
-            self.epoch_num = (self.current_round + 1) * self.epoch_each_round                                       # 当前epoch数
-            self.pseudo_label_dir = os.path.join(self.checkpoint_dir, 'pseudo-label', str(self.current_round))      # 伪标签路径
-
-            if not os.path.exists(self.pseudo_label_dir):                                                           # 新建伪标签文件夹
+            if not os.path.exists(self.pseudo_label_dir):  # 新建伪标签文件夹
                 self.gen_pseudo_label()
             else:
-                self.logger.info(self.pseudo_label_dir + 'exists! Skip gen pseudo label')                           # 伪标签文件夹已存在，则跳过
+                self.logger.info(self.pseudo_label_dir + 'exists! Skip gen pseudo label')  # 伪标签文件夹已存在，则跳过
             self.updata_target_dataloader()  # 更新目标域的dataloader
+            self.train_one_round()
 
     def gen_pseudo_label(self):
-        tqdm_epoch = tqdm(self.target_train_loader, total=self.target_train_iterations, desc="Generate pseudo label Epoch-{}-total-{}".format(self.current_epoch + 1, self.epoch_num))
-        self.target_train_loader.dataset.switch_to_gen_pseudo()         # 切换到伪标签模式（关闭random_mirror）
+        tqdm_epoch = tqdm(self.target_train_loader, total=self.train_iterations, desc="Generate pseudo label Epoch-{}-total-{}".format(self.current_epoch + 1, self.epoch_num))
+        self.target_train_loader.dataset.switch_to_gen_pseudo()  # 切换到伪标签模式（关闭random_mirror）
         self.logger.info("Generate pseudo label...")
         self.model.eval()
 
         self.model.apply(apply_dropout)
 
-        f_pass = 10 if self.use_uncertainty else 1          # 不确定性计算，前向传播10次。否则前向传播一次
+        f_pass = 10 if self.use_uncertainty else 1  # 不确定性计算，前向传播10次。否则前向传播一次
 
         for image, _, id_label in tqdm_epoch:
 
             # 预测结果和方差计算
             image = image.to(self.device)
             with torch.no_grad():
-                cur_out_prob = []                                   # 输出的置信度
-                for _ in range(f_pass):                             # 前向传播 f_pass 次
-                    preds, _ = self.model(image)                    # 前向传播，返回prediction, feature
-                    probs = torch.softmax(preds, dim=1)             # 转换为置信度 b,c,h,w
-                    cur_out_prob.append(probs)                      #
+                cur_out_prob = []  # 输出的置信度
+                for _ in range(f_pass):  # 前向传播 f_pass 次
+                    preds, _ = self.model(image)  # 前向传播，返回prediction, feature
+                    probs = torch.softmax(preds, dim=1)  # 转换为置信度 b,c,h,w
+                    cur_out_prob.append(probs)  #
             if f_pass == 1:
                 out_prob = cur_out_prob[0]
-                max_value, max_idx = torch.max(out_prob, dim=1)     # 最大的预测值和对应的索引      b,h,w
+                max_value, max_idx = torch.max(out_prob, dim=1)  # 最大的预测值和对应的索引      b,h,w
                 max_std = torch.zeros_like(max_value)
             else:
-                out_prob = torch.stack(cur_out_prob)                # 当前批次的预测样本堆叠起来 f_pass,b,c,h,w
-                out_prob_std = torch.std(out_prob, dim=0)           # 正伪标签的方差 b,c,h,w
-                out_prob_mean = torch.mean(out_prob, dim=0)         # 正伪标签的平均置信度 b,c,h,w
+                out_prob = torch.stack(cur_out_prob)  # 当前批次的预测样本堆叠起来 f_pass,b,c,h,w
+                out_prob_std = torch.std(out_prob, dim=0)  # 正伪标签的方差 b,c,h,w
+                out_prob_mean = torch.mean(out_prob, dim=0)  # 正伪标签的平均置信度 b,c,h,w
                 max_value, max_idx = torch.max(out_prob_mean, dim=1)  # 最大的预测值和对应的索引      b,h,w
                 max_std = out_prob_std.gather(1, max_idx.unsqueeze(dim=1)).squeeze(1)  # 最大预测值的方差         b,h,w
 
             # 阈值计算
             thre_conf = []  # 置信度阈值, 长度为num_classes的list
             thre_std = []  # 方差阈值(不确定性阈值)
-            for i in range(self.num_classes):
-                mask_i = (max_idx == i)                 # 预测为类别 i 的掩码
-                num_pixel = max_value[mask_i].size(0)   # 类别 i 的像素数量
-                if num_pixel == 0:                      # 类别 i 不存在，阈值设置为 0
+            for i in range(self.conf['num_classes']):
+                mask_i = (max_idx == i)  # 预测为类别 i 的掩码
+                num_pixel = max_value[mask_i].size(0)  # 类别 i 的像素数量
+                if num_pixel == 0:  # 类别 i 不存在，阈值设置为 0
                     thre_conf.append(0)
                     thre_std.append(0)
                 else:
-                    mid = num_pixel // 2                # 类别 i 的像素数量的一半
-                    half = num_pixel // 4               # 类别 i 的像素数量的四分之一
+                    mid = num_pixel // 2  # 类别 i 的像素数量的一半
+                    half = num_pixel // 4  # 类别 i 的像素数量的四分之一
 
                     # 类别 i 所有像素点置信度排序后，取中间值和 0.9 两者的最小值作为置信度阈值
                     max_value_i, _ = torch.sort(max_value[mask_i])
@@ -157,7 +167,7 @@ class Trainer:
 
             # 通过切片的操作，计算每个像素点对应 索引 的阈值，例如：某像素点索引为 4, 通过切片操作可以获取 thre_conf 中第4个元素的阈值。
             thre_conf = torch.tensor(thre_conf).cuda()[max_idx].detach()  # (b,h,w)
-            thre_std = torch.tensor(thre_std).cuda()[max_idx].detach()    # (b,h,w)
+            thre_std = torch.tensor(thre_std).cuda()[max_idx].detach()  # (b,h,w)
 
             if self.use_uncertainty:  # 大于置信度阈值，小于不确定性阈值的像素点选择为伪标签
                 selected_idx = (max_value >= thre_conf) * (max_std < thre_std)
@@ -166,16 +176,16 @@ class Trainer:
             unselected_idx = ~selected_idx  # 取反，选择所以不满足条件的像素点
 
             pseudo_label = max_idx.clone().cpu()
-            pseudo_label[unselected_idx] = self.ignore_index        # 未被选择的像素赋值为ignore_index
+            pseudo_label[unselected_idx] = self.ignore_index  # 未被选择的像素赋值为ignore_index
 
-            batch_size = max_idx.size(0)
+            batch_size = max_idx.size()
             for b in range(batch_size):
-                label = pseudo_label[b]                             # 需要保存的伪标签
-                output = np.asarray(label, dtype=np.uint8)          # 转换为图片
+                label = pseudo_label[b]  # 需要保存的伪标签
+                output = np.asarray(label, dtype=np.uint8)  # 转换为图片
                 output = Image.fromarray(output)
 
-                pseudo_name = id_label[b]                           # 标签文件相对路径名
-                save_path = self.pseudo_label_dir + pseudo_name     # 伪标签的保存路径
+                pseudo_name = id_label[b]  # 标签文件相对路径名
+                save_path = self.pseudo_label_dir + pseudo_name  # 伪标签的保存路径
 
                 # 保存伪标签
                 save_dir = os.path.dirname(save_path)
@@ -183,15 +193,16 @@ class Trainer:
                     os.makedirs(save_dir)
                 output.save(save_path)
 
-    def updata_target_dataloader(self):                           # 更新训练集的
-        self.conf['cityscapes']['label_dir'] = self.pseudo_label_dir
+    def updata_target_dataloader(self):  # 更新目标域的训练集
+        self.conf['cityscapes']['label_dir'] = self.pseudo_label_dir  # 更新目标域的训练集的标签路径为当前伪标签路径
+        self.conf['cityscapes']['use_pseudo'] = True  # 设置为使用伪标签
         self.target_train_loader = get_city_dataloader(self.conf, 'train')
 
-    def train(self):
+    def train_one_round(self):
 
-        for _ in tqdm(range(self.current_epoch, self.num_epoch), desc="Total {} epochs".format(self.num_epoch)):
+        for _ in tqdm(range(self.current_epoch, self.epoch_each_round), desc="Total {} epochs".format(self.epoch_each_round)):
             self.current_epoch += 1
-            
+
             # train
             self.train_one_epoch()  # 训练一个epoch
 
@@ -216,61 +227,104 @@ class Trainer:
         self.save_checkpoint(self.model_name + 'final.pth')
 
     def train_one_epoch(self):
-        tqdm_epoch = tqdm(self.source_train_loader, total=self.train_iterations, desc="Train epoch-{}-total-{}".format(self.current_epoch, self.num_epoch))
+        tqdm_epoch = tqdm(zip(self.source_train_loader, self.target_train_loader), total=self.train_iterations,
+                          desc="Train Round-{}-Epoch-{}-total-{}".format(self.current_round, self.current_epoch + 1, self.epoch_num))
         self.logger.info("")
-        self.logger.info("Training on source_train of epoch-{}...".format(self.current_epoch))
-        self.Eval.reset()  # 混淆矩阵清零
-        train_loss = []
-
+        self.logger.info("Training on source and target of epoch-{}...".format(self.current_epoch))
+        self.eval.reset()  # 混淆矩阵清零
         self.model.train()
 
-        for batch_idx, data in enumerate(tqdm_epoch):
+        log_dic = {}     # 保存loss的字典
+        loss_kwargs = {'norm_order': self.conf['norm_order'],    # 参数字典
+                       'thing_type': self.conf['thing_type'],
+                       'entropy_type': self.conf['entropy_type'],
+                       'centroid_smoothing': self.conf['centroid_smoothing']}
 
-            # 数据处理
-            images, labels, id_labels = data
-            images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)  # 尺寸大小：(b,3,h,w), (b,h,w)
-            labels = torch.squeeze(labels, 1)  # (b,h,w) ==> (b,1, h,w)
+        # 平均指数移动的参数
+        for batch_idx, data_s, data_t in enumerate(tqdm_epoch):
+
+            self.optimizer.zero_grad()  # 梯度清零
 
             # 更新学习率
-            poly_lr_scheduler(self.optimizer, self.conf['lr'], self.current_iter, self.conf['iter_max'], self.conf['poly_power'])
+            poly_lr_scheduler(self.optimizer, self.conf['lr'], self.current_iter, self.iter_total, self.conf['poly_power'])
             self.writer.add_scalar('learning_rate', self.optimizer.param_groups[0]["lr"], self.current_iter)
 
-            self.optimizer.zero_grad()              # 梯度清零
-            preds, _ = self.model(images)           # 前向传播，返回prediction, feature
-            cur_loss = self.loss(preds, labels)     # 交叉熵损失函数
-            cur_loss.backward()                     # 反向传播
-            self.optimizer.step()                   # 参数更新
+            #######################
+            # Source forward step #
+            #######################
 
-            # 损失计算
-            if np.isnan(float(cur_loss.item())):
-                raise ValueError('Loss is nan during training...')
-            train_loss.append(cur_loss.item())
-            train_loss_avg = sum(train_loss) / len(train_loss)
-            self.writer.add_scalar('train_loss', train_loss_avg, self.current_epoch)
+            # train data (labeled)
+            images, labels, _ = data_s
+            images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,h,w)
+            labels = torch.squeeze(labels, 1)  # (b,h,w) ==> (b,1, h,w)
 
-            arg_preds = torch.argmax(preds, dim=1)                      # 预测结果，(b,c,h,w) ==> (b,h,w)
-            # 更新混淆矩阵
-            self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
+            # 前向传播
+            pred_source, feat_source = self.model(images)  # (b c h w)  (b f h' w')
+            pred_source_softmax = torch.nn.functional.softmax(pred_source, dim=1)  # (b c h' w')
+
+            # loss计算、反向传播
+            cur_loss = self.loss(pred_source, labels)  # 交叉熵损失函数
+            cur_loss.backward()  # 反向传播
+            log_dic['Source_ce_loss'] = cur_loss.item()
+
+            #######################
+            # Target forward step #
+            #######################
+
+            # target data (unlabeld)
+            images, pseudo_labels, _ = data_s
+            images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,h,w)
+            labels = torch.squeeze(labels, 1)  # (b,h,w) ==> (b,1, h,w)
+
+            # 前向传播
+            pred_target, feat_target = self.model(images)  # (b c h w)  (b f h' w')
+            pred_target_softmax = torch.nn.functional.softmax(pred_source, dim=1)  # (b c h' w')
+
+            loss_kwargs['source_prob'] = pred_source_softmax    # 源域预测结果softmax,
+            loss_kwargs['target_prob'] = pred_target_softmax    # 目标域预测结果softmax
+            loss_kwargs['source_feat'] = feat_source            # 源域的中间特征
+            loss_kwargs['target_feat'] = feat_target            # 目标域的中间特征
+            loss_kwargs['source_label'] = labels                # 源域的标签
+            loss_kwargs['target_label'] = pseudo_labels         # 目标域的伪标签
+
+            # 传入参数，计算当前批次的目标域的损失
+            loss_dict = self.feat_reg_ST_loss(**loss_kwargs)
+            stuff_alignment_loss, thing_alignment_loss, EM_loss = loss_dict['stuff_alignment_loss'], loss_dict['thing_alignment_loss'], loss_dict['EM_loss']
+
+            thing_alignment_loss = self.lambda_things * thing_alignment_loss
+            stuff_alignment_loss = self.lambda_stuff * stuff_alignment_loss
+            em_loss = self.lambda_entropy * EM_loss
+
+            total_loss = thing_alignment_loss + stuff_alignment_loss + em_loss
+            total_loss.backward()
+
+            # 保存当前loss
+            log_dic['Stuff_alignment_loss'] = stuff_alignment_loss.item()
+            log_dic['Thing_alignment_loss'] = thing_alignment_loss.item()
+            log_dic['EM_loss'] = em_loss.item()
+            log_dic['Target_loss'] = total_loss.item()
+            log_string = 'epoch{}-batch-{}:' + '={:3f}-'.join(log_dic.keys()) + '={:3f}'
+
+            # logging
+            if batch_idx % self.conf['iter_show_loss'] == 0:
+                self.logger.info(log_string.format(self.current_epoch, batch_idx, *log_dic.values()))
+                for name, elem in log_dic.items():
+                    self.writer.add_scalar(name, elem, self.current_iter)
 
             self.current_iter += 1  # 更新总迭代次数
 
-            # 打印loss
-            if batch_idx % self.conf['iter_show_loss'] == 0:
-                self.logger.info("The train loss of epoch-{}-batch-{}:{}".format(self.current_epoch, batch_idx, cur_loss.item()))
+            self.optimizer.step()  # 参数更新
 
-            # epoch迭代结束
-            if batch_idx == self.train_iterations - 1:
-                self.save_images(images, labels, arg_preds, 'source_train')  # 可视化最后一次迭代的图片
-                tqdm.write("The average loss of train epoch-{}-:{}".format(self.current_epoch, train_loss_avg))  # 打印最后一次迭代的loss
-                tqdm_epoch.close()
-                break
+        tqdm_epoch.close()
+        self.feat_reg_ST_loss.reset()
 
-        # 计算指标
-        self.computer_and_save_metric('source_train')
+        if self.conf['save_inter_model']:
+            self.logger.info("Saving model of epoch {} ...".format(self.current_epoch))
+            self.save_checkpoint(self.model_name + '_epoch{}.pth'.format(self.current_epoch))
 
     def validate(self, name='target_val'):
         self.logger.info('Validating on {} of epoch-{}...'.format(name, self.current_epoch))
-        self.Eval.reset()
+        self.eval.reset()
 
         val_loader = self.target_val_loader if name == 'target_val' else self.source_val_loader
 
@@ -283,20 +337,20 @@ class Trainer:
                 images, labels, id_labels = data
 
                 b, H, W = labels.shape
-                images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)    # (b,3,h,w), (b,H,W) val评估的时候，需要原图大小的标签
-                labels = torch.squeeze(labels, 1)                                                           # (b,H,W) ==> (b,1,H,W)
+                images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,H,W) val评估的时候，需要原图大小的标签
+                labels = torch.squeeze(labels, 1)  # (b,H,W) ==> (b,1,H,W)
 
-                preds, _ = self.model(images)                                                               # prediction, feature
-                arg_preds = torch.argmax(preds, dim=1, keepdim=True)                                        # 预测类别, (b,c,h,w) ==> (b,1,h,w) (要对h，w上采样，interpolate输入必须为4维。因此要keepdim)
-                arg_preds = arg_preds.to(torch.float32)                                                     # interpolate 不能处理int类型
-                arg_preds = nn.functional.interpolate(arg_preds, size=(H, W), mode='nearest')               # (b,1,h,w) ==> (b,1,H,W) 上采样
-                arg_preds = arg_preds.squeeze(dim=1).to(torch.int64)                                        # (b,1,H,W) ==> (b,H,W), 和labels数据类型一致
+                preds, _ = self.model(images)  # prediction, feature
+                arg_preds = torch.argmax(preds, dim=1, keepdim=True)  # 预测类别, (b,c,h,w) ==> (b,1,h,w) (要对h，w上采样，interpolate输入必须为4维。因此要keepdim)
+                arg_preds = arg_preds.to(torch.float32)  # interpolate 不能处理int类型
+                arg_preds = torch.nn.functional.interpolate(arg_preds, size=(H, W), mode='nearest')  # (b,1,h,w) ==> (b,1,H,W) 上采样
+                arg_preds = arg_preds.squeeze(dim=1).to(torch.int64)  # (b,1,H,W) ==> (b,H,W), 和labels数据类型一致
 
-                self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
+                self.eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
 
             #  可视化最后一次迭代的图片
             self.save_images(images, labels, arg_preds, name)
-            PA, MPA, MIoU, FWIoU = self.computer_and_save_metric(name)
+            PA, MPA, MIoU, FWIoU = computer_and_save_metric(name, self.eval, self.logger, self.writer, self.current_epoch, self.conf['num_classes'])
             tqdm_batch.close()
 
         return PA, MPA, MIoU, FWIoU
@@ -305,45 +359,14 @@ class Trainer:
 
         # show train image on tensorboard
         images_inv = inv_preprocess(images.clone().cpu())
-        labels_colors = decode_labels(labels, self.num_classes)
-        preds_colors = decode_labels(arg_preds, self.num_classes)
+        labels_colors = decode_labels(labels, self.conf['num_classes'])
+        preds_colors = decode_labels(arg_preds, self.conf['num_classes'])
         self.writer.add_image('{}/Images'.format(name), images_inv, self.current_epoch)
         self.writer.add_image('{}/Labels'.format(name), labels_colors, self.current_epoch)
         self.writer.add_image('{}/preds'.format(name), preds_colors, self.current_epoch)
 
-    def computer_and_save_metric(self, name):
-        # computer metric
-        if self.num_classes == 16:
-            PA = self.Eval.Pixel_Accuracy()
-            MPA_16, MPA_13 = self.Eval.Mean_Pixel_Accuracy()
-            MIoU_16, MIoU_13 = self.Eval.Mean_Intersection_over_Union()
-            FWIoU_16, FWIoU_13 = self.Eval.Frequency_Weighted_Intersection_over_Union()
-            PC_16, PC_13 = self.Eval.Mean_Precision()
-            self.logger.info('Results of {}, PA:{:.3f}, MPA_16:{:.3f}, MIoU_16:{:.3f}, FWIoU_16:{:.3f}, PC_16:{:.3f}'.format(name, PA, MPA_16, MIoU_16, FWIoU_16, PC_16))
-            self.logger.info('Results of {}, PA:{:.3f}, MPA_13:{:.3f}, MIoU_13:{:.3f}, FWIoU_13:{:.3f}, PC_13:{:.3f}'.format(name, PA, MPA_13, MIoU_13, FWIoU_13, PC_13))
-            self.writer.add_scalar(name + '/PA', PA, self.current_epoch)
-            self.writer.add_scalar(name + '/MPA_16', MPA_16, self.current_epoch)
-            self.writer.add_scalar(name + '/MIoU_16', MIoU_16, self.current_epoch)
-            self.writer.add_scalar(name + '/FWIoU_16', FWIoU_16, self.current_epoch)
-            self.writer.add_scalar(name + '/MPA_13', MPA_13, self.current_epoch)
-            self.writer.add_scalar(name + '/MIoU_13', MIoU_13, self.current_epoch)
-            self.writer.add_scalar(name + '/FWIoU_13', FWIoU_13, self.current_epoch)
-            return PA, MPA_16, MIoU_16, FWIoU_16
-        else:
-            PA = self.Eval.Pixel_Accuracy()
-            MPA = self.Eval.Mean_Pixel_Accuracy()
-            MIoU = self.Eval.Mean_Intersection_over_Union()
-            FWIoU = self.Eval.Frequency_Weighted_Intersection_over_Union()
-            PC = self.Eval.Mean_Precision()
-            self.logger.info('Results of {}, PA1:{:.3f}, MPA1:{:.3f}, MIoU1:{:.3f}, FWIoU1:{:.3f}, PC:{:.3f}'.format(name, PA, MPA, MIoU, FWIoU, PC))
-            self.writer.add_scalar(name + '/PA', PA, self.current_epoch)
-            self.writer.add_scalar(name + '/MPA', MPA, self.current_epoch)
-            self.writer.add_scalar(name + '/MIoU', MIoU, self.current_epoch)
-            self.writer.add_scalar(name + '/FWIoU', FWIoU, self.current_epoch)
-            return PA, MPA, MIoU, FWIoU
-
     def save_checkpoint(self, file_name=None):
-        file_name = os.path.join(self.checkpoint_dir, file_name)
+        file_name = os.path.join(self.conf['checkpoint_dir'], file_name)
         state = {
             'epoch': self.current_epoch,
             'iteration': self.current_iter,
@@ -363,8 +386,8 @@ class Trainer:
             else:
                 self.model.module.load_state_dict(checkpoint)
             self.logger.info("Checkpoint loaded successfully from " + filename)
-        except OSError as e:
-            self.logger.info("No checkpoint exists from '{}'. Skipping...".format(self.checkpoint_dir))
+        except OSError as _:
+            self.logger.info("No checkpoint exists from '{}'. Skipping...".format(self.conf['checkpoint_dir']))
             self.logger.info("**First time to train**")
 
 
@@ -373,16 +396,19 @@ def init_config(config_path):
     config = yaml.load(open(config_path, "r"), Loader=yaml.FullLoader)
     train_conf = config['train']
 
-    # data configure
-    for domain_data_name in ['source_data_name', 'target_data_name']:
-        data_name = train_conf[domain_data_name]  # 数据集名称
-        data_conf = train_conf[data_name]  # 数据集参数
-        data_conf['size'] = tuple(map(int, data_conf['size'].split(',')))  # 将size的h,w转换为int，并且组合为tuple类型
-
     assert train_conf['num_classes'] == 19 if train_conf['source_data_name'] == 'gta5' else train_conf['num_classes'] == 16
+    assert train_conf['centroid_smoothing'] <= 1., 'Centroid smoothing coefficient with invalid value: {}'.format(train_conf['centroid_smoothing'])
+
+    # data configure
+    source_data_conf = train_conf[train_conf['source_data_name']]
+    target_data_conf = train_conf[train_conf['target_data_name']]
+    for data_conf in [source_data_conf, target_data_conf]:
+        data_conf['size'] = tuple(map(int, data_conf['size'].split(',')))   # 将size的h,w转换为int，并且组合为tuple类型
+    if source_data_conf['use_trans_image']:                                 # 使用翻译后的图像
+        source_data_conf['image_dir'] = source_data_conf['trans_image_dir']
 
     # checkpoint_dir configure
-    checkpoint_dir = os.path.join(train_conf['log_dir'], train_conf['exp_name'])
+    checkpoint_dir = train_conf['checkpoint_dir']
     assert not os.path.exists(checkpoint_dir), "checkpoint dir exists! rm -r {}".format(checkpoint_dir)
     try:
         os.makedirs(checkpoint_dir)
