@@ -3,13 +3,16 @@ import yaml
 import shutil
 import random
 import logging
-import torch.nn as nn
+import torch.nn
+import torch.nn.functional
+import torch.backends.cudnn
 from tqdm import tqdm
 from math import ceil
 from tensorboardX import SummaryWriter
 
 from misc.eval import Eval
 from misc.utils import *
+from misc.eval import computer_and_save_metric
 
 
 class Trainer:
@@ -33,21 +36,21 @@ class Trainer:
         self.writer = SummaryWriter(self.checkpoint_dir)
 
         # Metric definition
-        self.Eval = Eval(self.num_classes)
+        self.eval = Eval(self.num_classes)
 
         # loss definition
-        self.loss = nn.CrossEntropyLoss(weight=None, ignore_index=-1)
+        self.loss = torch.nn.CrossEntropyLoss(weight=None, ignore_index=-1)
         self.loss.to(self.device)
 
         # model
         self.model, params = get_model(conf)
-        self.model = nn.DataParallel(self.model)
+        self.model = torch.nn.DataParallel(self.model)
         self.model.to(self.device)
 
         if conf['optim'] == "SGD":
-            self.optimizer = torch.optim.SGD(params, momentum=conf['momentum'], weight_decay=conf['weight_decay'])
+            self.optimizer = torch.optim.SGD(params, lr=self.conf['lr'], momentum=conf['momentum'], weight_decay=conf['weight_decay'])
         elif conf['optim'] == "Adam":
-            self.optimizer = torch.optim.Adam(params, betas=(conf['beta'], 0.99), weight_decay=conf['weight_decay'])
+            self.optimizer = torch.optim.Adam(params, lr=self.conf['lr'], betas=(conf['beta'], 0.99), weight_decay=conf['weight_decay'])
 
         # data loader
         self.source_train_loader, self.source_val_loader = get_dataloader(conf, 'source')
@@ -115,7 +118,7 @@ class Trainer:
         tqdm_epoch = tqdm(self.source_train_loader, total=self.train_iterations, desc="Train epoch-{}-total-{}".format(self.current_epoch, self.num_epoch))
         self.logger.info("")
         self.logger.info("Training on source_train of epoch-{}...".format(self.current_epoch))
-        self.Eval.reset()  # 混淆矩阵清零
+        self.eval.reset()  # 混淆矩阵清零
         train_loss = []
 
         self.model.train()
@@ -144,7 +147,7 @@ class Trainer:
 
             # 更新混淆矩阵
             arg_preds = torch.argmax(preds, dim=1)                      # 预测结果，(b,c,h,w) ==> (b,h,w)
-            self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
+            self.eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
 
             # 计算当前 epoch 的平均 loss
             train_loss.append(cur_loss.item())
@@ -164,11 +167,11 @@ class Trainer:
                 break
 
         # 计算指标
-        self.computer_and_save_metric('source_train')
+        computer_and_save_metric('source_train', self.eval, self.logger, self.writer, self.current_epoch, self.num_classes)
 
     def validate(self, name='target_val'):
         self.logger.info('Validating on {} of epoch-{}...'.format(name, self.current_epoch))
-        self.Eval.reset()
+        self.eval.reset()
 
         val_loader = self.target_val_loader if name == 'target_val' else self.source_val_loader
 
@@ -187,14 +190,14 @@ class Trainer:
                 preds, _ = self.model(images)                                                               # prediction, feature
                 arg_preds = torch.argmax(preds, dim=1, keepdim=True)                                        # 预测类别, (b,c,h,w) ==> (b,1,h,w) (要对h，w上采样，interpolate输入必须为4维。因此要keepdim)
                 arg_preds = arg_preds.to(torch.float32)                                                     # interpolate 不能处理int类型
-                arg_preds = nn.functional.interpolate(arg_preds, size=(H, W), mode='nearest')               # (b,1,h,w) ==> (b,1,H,W) 上采样
+                arg_preds = torch.nn.functional.interpolate(arg_preds, size=(H, W), mode='nearest')               # (b,1,h,w) ==> (b,1,H,W) 上采样
                 arg_preds = arg_preds.squeeze(dim=1).to(torch.int64)                                        # (b,1,H,W) ==> (b,H,W), 和labels数据类型一致
 
-                self.Eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
+                self.eval.add_batch(labels.cpu().numpy(), arg_preds.cpu().numpy())
 
             #  可视化最后一次迭代的图片
             self.save_images(images, labels, arg_preds, name)
-            PA, MPA, MIoU, FWIoU = self.computer_and_save_metric(name)
+            PA, MPA, MIoU, FWIoU = computer_and_save_metric(name, self.eval, self.logger, self.writer, self.current_epoch, self.num_classes)
             tqdm_batch.close()
 
         return PA, MPA, MIoU, FWIoU
@@ -208,37 +211,6 @@ class Trainer:
         self.writer.add_image('{}/Images'.format(name), images_inv, self.current_epoch)
         self.writer.add_image('{}/Labels'.format(name), labels_colors, self.current_epoch)
         self.writer.add_image('{}/preds'.format(name), preds_colors, self.current_epoch)
-
-    def computer_and_save_metric(self, name):
-        # computer metric
-        if self.num_classes == 16:
-            PA = self.Eval.Pixel_Accuracy()
-            MPA_16, MPA_13 = self.Eval.Mean_Pixel_Accuracy()
-            MIoU_16, MIoU_13 = self.Eval.Mean_Intersection_over_Union()
-            FWIoU_16, FWIoU_13 = self.Eval.Frequency_Weighted_Intersection_over_Union()
-            PC_16, PC_13 = self.Eval.Mean_Precision()
-            self.logger.info('Results of {}, PA:{:.3f}, MPA_16:{:.3f}, MIoU_16:{:.3f}, FWIoU_16:{:.3f}, PC_16:{:.3f}'.format(name, PA, MPA_16, MIoU_16, FWIoU_16, PC_16))
-            self.logger.info('Results of {}, PA:{:.3f}, MPA_13:{:.3f}, MIoU_13:{:.3f}, FWIoU_13:{:.3f}, PC_13:{:.3f}'.format(name, PA, MPA_13, MIoU_13, FWIoU_13, PC_13))
-            self.writer.add_scalar(name + '/PA', PA, self.current_epoch)
-            self.writer.add_scalar(name + '/MPA_16', MPA_16, self.current_epoch)
-            self.writer.add_scalar(name + '/MIoU_16', MIoU_16, self.current_epoch)
-            self.writer.add_scalar(name + '/FWIoU_16', FWIoU_16, self.current_epoch)
-            self.writer.add_scalar(name + '/MPA_13', MPA_13, self.current_epoch)
-            self.writer.add_scalar(name + '/MIoU_13', MIoU_13, self.current_epoch)
-            self.writer.add_scalar(name + '/FWIoU_13', FWIoU_13, self.current_epoch)
-            return PA, MPA_16, MIoU_16, FWIoU_16
-        else:
-            PA = self.Eval.Pixel_Accuracy()
-            MPA = self.Eval.Mean_Pixel_Accuracy()
-            MIoU = self.Eval.Mean_Intersection_over_Union()
-            FWIoU = self.Eval.Frequency_Weighted_Intersection_over_Union()
-            PC = self.Eval.Mean_Precision()
-            self.logger.info('Results of {}, PA1:{:.3f}, MPA1:{:.3f}, MIoU1:{:.3f}, FWIoU1:{:.3f}, PC:{:.3f}'.format(name, PA, MPA, MIoU, FWIoU, PC))
-            self.writer.add_scalar(name + '/PA', PA, self.current_epoch)
-            self.writer.add_scalar(name + '/MPA', MPA, self.current_epoch)
-            self.writer.add_scalar(name + '/MIoU', MIoU, self.current_epoch)
-            self.writer.add_scalar(name + '/FWIoU', FWIoU, self.current_epoch)
-            return PA, MPA, MIoU, FWIoU
 
     def save_checkpoint(self, file_name=None):
         file_name = os.path.join(self.checkpoint_dir, file_name)
@@ -261,7 +233,7 @@ class Trainer:
             else:
                 self.model.module.load_state_dict(checkpoint)
             self.logger.info("Checkpoint loaded successfully from " + filename)
-        except OSError as e:
+        except OSError:
             self.logger.info("No checkpoint exists from '{}'. Skipping...".format(self.checkpoint_dir))
             self.logger.info("**First time to train**")
 

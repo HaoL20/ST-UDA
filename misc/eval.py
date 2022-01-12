@@ -154,3 +154,35 @@ class Eval:
 
     def reset(self):
         self.confusion_matrix = np.zeros((self.num_class,) * 2)
+
+
+def computer_and_save_metric(name, eval, logger, writer, current_epoch, num_classes):
+    # computer metric
+    if num_classes == 16:
+        PA = eval.Pixel_Accuracy()
+        MPA_16, MPA_13 = eval.Mean_Pixel_Accuracy()
+        MIoU_16, MIoU_13 = eval.Mean_Intersection_over_Union()
+        FWIoU_16, FWIoU_13 = eval.Frequency_Weighted_Intersection_over_Union()
+        PC_16, PC_13 = eval.Mean_Precision()
+        logger.info('Results of {}, PA:{:.3f}, MPA_16:{:.3f}, MIoU_16:{:.3f}, FWIoU_16:{:.3f}, PC_16:{:.3f}'.format(name, PA, MPA_16, MIoU_16, FWIoU_16, PC_16))
+        logger.info('Results of {}, PA:{:.3f}, MPA_13:{:.3f}, MIoU_13:{:.3f}, FWIoU_13:{:.3f}, PC_13:{:.3f}'.format(name, PA, MPA_13, MIoU_13, FWIoU_13, PC_13))
+        writer.add_scalar(name + '/PA', PA, current_epoch)
+        writer.add_scalar(name + '/MPA_16', MPA_16, current_epoch)
+        writer.add_scalar(name + '/MIoU_16', MIoU_16, current_epoch)
+        writer.add_scalar(name + '/FWIoU_16', FWIoU_16, current_epoch)
+        writer.add_scalar(name + '/MPA_13', MPA_13, current_epoch)
+        writer.add_scalar(name + '/MIoU_13', MIoU_13, current_epoch)
+        writer.add_scalar(name + '/FWIoU_13', FWIoU_13, current_epoch)
+        return PA, MPA_16, MIoU_16, FWIoU_16
+    else:
+        PA = eval.Pixel_Accuracy()
+        MPA = eval.Mean_Pixel_Accuracy()
+        MIoU = eval.Mean_Intersection_over_Union()
+        FWIoU = eval.Frequency_Weighted_Intersection_over_Union()
+        PC = eval.Mean_Precision()
+        logger.info('Results of {}, PA1:{:.3f}, MPA1:{:.3f}, MIoU1:{:.3f}, FWIoU1:{:.3f}, PC:{:.3f}'.format(name, PA, MPA, MIoU, FWIoU, PC))
+        writer.add_scalar(name + '/PA', PA, current_epoch)
+        writer.add_scalar(name + '/MPA', MPA, current_epoch)
+        writer.add_scalar(name + '/MIoU', MIoU, current_epoch)
+        writer.add_scalar(name + '/FWIoU', FWIoU, current_epoch)
+        return PA, MPA, MIoU, FWIoU
