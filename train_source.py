@@ -21,10 +21,8 @@ class Trainer:
         self.device = device
         self.logger = logger
         self.model_name = conf['source_data_name']  # 保存的模型前缀
-        self.num_classes = conf['num_classes']
 
-        self.checkpoint_dir = conf['checkpoint_dir']
-
+        self.ignore_index = -1
         self.current_MIoU = 0
         self.best_MIou = 0
         self.best_source_MIou = 0
@@ -33,10 +31,10 @@ class Trainer:
         self.best_iter = None
 
         # set TensorboardX
-        self.writer = SummaryWriter(self.checkpoint_dir)
+        self.writer = SummaryWriter(self.conf['checkpoint_dir'])
 
         # Metric definition
-        self.eval = Eval(self.num_classes)
+        self.eval = Eval(self.conf['num_classes'])
 
         # loss definition
         self.loss = torch.nn.CrossEntropyLoss(weight=None, ignore_index=-1)
@@ -167,10 +165,10 @@ class Trainer:
                 break
 
         # 计算指标
-        computer_and_save_metric('source_train', self.eval, self.logger, self.writer, self.current_epoch, self.num_classes)
+        computer_and_save_metric('source_train', self.eval, self.logger, self.writer, self.current_epoch, self.conf['num_classes'])
 
     def validate(self, name='target_val'):
-        self.logger.info('Validating on {} of epoch-{}...'.format(name, self.current_epoch))
+        self.logger.info('Validating on {} of epoch-{}....'.format(name, self.current_epoch))
         self.eval.reset()
 
         val_loader = self.target_val_loader if name == 'target_val' else self.source_val_loader
@@ -197,7 +195,7 @@ class Trainer:
 
             #  可视化最后一次迭代的图片
             self.save_images(images, labels, arg_preds, name)
-            PA, MPA, MIoU, FWIoU = computer_and_save_metric(name, self.eval, self.logger, self.writer, self.current_epoch, self.num_classes)
+            PA, MPA, MIoU, FWIoU = computer_and_save_metric(name, self.eval, self.logger, self.writer, self.current_epoch, self.conf['num_classes'])
             tqdm_batch.close()
 
         return PA, MPA, MIoU, FWIoU
@@ -206,14 +204,14 @@ class Trainer:
 
         # show train image on tensorboard
         images_inv = inv_preprocess(images.clone().cpu())
-        labels_colors = decode_labels(labels, self.num_classes)
-        preds_colors = decode_labels(arg_preds, self.num_classes)
+        labels_colors = decode_labels(labels, self.conf['num_classes'])
+        preds_colors = decode_labels(arg_preds, self.conf['num_classes'])
         self.writer.add_image('{}/Images'.format(name), images_inv, self.current_epoch)
         self.writer.add_image('{}/Labels'.format(name), labels_colors, self.current_epoch)
         self.writer.add_image('{}/preds'.format(name), preds_colors, self.current_epoch)
 
     def save_checkpoint(self, file_name=None):
-        file_name = os.path.join(self.checkpoint_dir, file_name)
+        file_name = os.path.join(self.conf['checkpoint_dir'], file_name)
         state = {
             'epoch': self.current_epoch,
             'iteration': self.current_iter,
@@ -234,7 +232,7 @@ class Trainer:
                 self.model.module.load_state_dict(checkpoint)
             self.logger.info("Checkpoint loaded successfully from " + filename)
         except OSError:
-            self.logger.info("No checkpoint exists from '{}'. Skipping...".format(self.checkpoint_dir))
+            self.logger.info("No checkpoint exists from '{}'. Skipping...".format(self.conf['checkpoint_dir']))
             self.logger.info("**First time to train**")
 
 
