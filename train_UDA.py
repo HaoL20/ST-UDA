@@ -98,7 +98,6 @@ class Trainer:
 
         self.train()
         self.writer.close()
-        self.current_round += 1
 
     def train(self):
         for _ in range(self.current_round, self.round_num):
@@ -112,6 +111,7 @@ class Trainer:
                 self.logger.info(self.pseudo_label_dir + 'exists! Skip gen pseudo label')  # 伪标签文件夹已存在，则跳过
             self.updata_target_dataloader()  # 更新目标域的dataloader
             self.train_one_round()
+            self.current_round += 1
 
     def gen_pseudo_label(self):
         tqdm_epoch = tqdm(self.target_train_loader, total=self.train_iterations, desc="Generate pseudo label Epoch-{}-total-{}".format(self.current_epoch + 1, self.epoch_num))
@@ -200,7 +200,7 @@ class Trainer:
 
     def train_one_round(self):
 
-        for _ in tqdm(range(self.current_epoch, self.epoch_each_round), desc="Total {} epochs".format(self.epoch_each_round)):
+        for _ in tqdm(self.epoch_each_round, desc="Total {} epochs".format(self.epoch_each_round)):
             self.current_epoch += 1
 
             # train
