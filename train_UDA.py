@@ -200,7 +200,7 @@ class Trainer:
 
     def train_one_round(self):
 
-        for _ in tqdm(self.epoch_each_round, desc="Total {} epochs".format(self.epoch_each_round)):
+        for _ in tqdm(range(self.epoch_each_round), desc="Total {} epochs".format(self.epoch_each_round)):
             self.current_epoch += 1
 
             # train
@@ -289,7 +289,7 @@ class Trainer:
 
             # 传入参数，计算当前批次的目标域的损失
             loss_dict = self.feat_reg_ST_loss(**loss_kwargs)
-            stuff_alignment_loss, thing_alignment_loss, em_loss = loss_dict['stuff_alignment_loss'], loss_dict['thing_alignment_loss'], loss_dict['EM_loss']
+            stuff_alignment_loss, thing_alignment_loss, em_loss = loss_dict['stuff_alignment_loss'], loss_dict['thing_alignment_loss'], loss_dict['em_loss']
 
             thing_alignment_loss = self.lambda_things * thing_alignment_loss
             stuff_alignment_loss = self.lambda_stuff * stuff_alignment_loss
