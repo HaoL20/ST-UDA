@@ -89,10 +89,10 @@ class Trainer:
             self.logger.info("This model will run on CPU")
 
         # load pretrained checkpoint
-        if self.conf['pretrained_model_file'] != '':
-            if os.path.isdir(self.conf['pretrained_model_file']):
-                self.conf['pretrained_model_file'] = os.path.join(self.conf['checkpoint_dir'], self.model_name + 'best.pth')
-            self.load_checkpoint(self.conf['pretrained_model_file'])
+        if self.conf['warmup_model_file'] != '':
+            if os.path.isdir(self.conf['warmup_model_file']):
+                self.conf['warmup_model_file'] = os.path.join(self.conf['checkpoint_dir'], self.model_name + 'best.pth')
+            self.load_checkpoint(self.conf['warmup_model_file'])
 
         self.logger.info('Iter max: {} \nNumber of iterations: {}'.format(self.iter_total, self.train_iterations))
 
@@ -178,7 +178,7 @@ class Trainer:
             pseudo_label = max_idx.clone().cpu()
             pseudo_label[unselected_idx] = self.ignore_index  # 未被选择的像素赋值为ignore_index
 
-            batch_size = max_idx.size()
+            batch_size = max_idx.size(0)
             for b in range(batch_size):
                 label = pseudo_label[b]  # 需要保存的伪标签
                 output = np.asarray(label, dtype=np.uint8)  # 转换为图片
@@ -241,8 +241,8 @@ class Trainer:
                        'centroid_smoothing': self.conf['centroid_smoothing']}
 
         # 平均指数移动的参数
-        for batch_idx, data_s, data_t in enumerate(tqdm_epoch):
-
+        for batch_idx, data in enumerate(tqdm_epoch):
+            data_s, data_t = data
             self.optimizer.zero_grad()  # 梯度清零
 
             # 更新学习率
@@ -264,7 +264,7 @@ class Trainer:
 
             # loss计算、反向传播
             cur_loss = self.loss(pred_source, labels)  # 交叉熵损失函数
-            cur_loss.backward()  # 反向传播
+            cur_loss.backward(retain_graph=True)  # 反向传播
             log_dic['Source_ce_loss'] = cur_loss.item()
 
             #######################
@@ -273,27 +273,27 @@ class Trainer:
 
             # target data (unlabeld)
             images, pseudo_labels, _ = data_s
-            images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,h,w)
-            labels = torch.squeeze(labels, 1)  # (b,h,w) ==> (b,1, h,w)
+            images, pseudo_labels = images.to(self.device), pseudo_labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,h,w)
+            pseudo_labels = torch.squeeze(pseudo_labels, 1)  # (b,h,w) ==> (b,1, h,w)
 
             # 前向传播
             pred_target, feat_target = self.model(images)  # (b c h w)  (b f h' w')
             pred_target_softmax = torch.nn.functional.softmax(pred_source, dim=1)  # (b c h' w')
 
-            loss_kwargs['source_prob'] = pred_source_softmax    # 源域预测结果softmax,
+            loss_kwargs['source_prob'] = pred_source_softmax.detach()    # 源域预测结果softmax,
             loss_kwargs['target_prob'] = pred_target_softmax    # 目标域预测结果softmax
-            loss_kwargs['source_feat'] = feat_source            # 源域的中间特征
+            loss_kwargs['source_feat'] = feat_source.detach()            # 源域的中间特征
             loss_kwargs['target_feat'] = feat_target            # 目标域的中间特征
-            loss_kwargs['source_label'] = labels                # 源域的标签
+            loss_kwargs['source_label'] = labels.detach()                # 源域的标签
             loss_kwargs['target_label'] = pseudo_labels         # 目标域的伪标签
 
             # 传入参数，计算当前批次的目标域的损失
             loss_dict = self.feat_reg_ST_loss(**loss_kwargs)
-            stuff_alignment_loss, thing_alignment_loss, EM_loss = loss_dict['stuff_alignment_loss'], loss_dict['thing_alignment_loss'], loss_dict['EM_loss']
+            stuff_alignment_loss, thing_alignment_loss, em_loss = loss_dict['stuff_alignment_loss'], loss_dict['thing_alignment_loss'], loss_dict['EM_loss']
 
             thing_alignment_loss = self.lambda_things * thing_alignment_loss
             stuff_alignment_loss = self.lambda_stuff * stuff_alignment_loss
-            em_loss = self.lambda_entropy * EM_loss
+            em_loss = self.lambda_entropy * em_loss
 
             total_loss = thing_alignment_loss + stuff_alignment_loss + em_loss
             total_loss.backward()
