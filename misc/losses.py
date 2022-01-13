@@ -15,15 +15,19 @@ class STLoss(nn.Module):
             # GTA5 标签数量比例
             # self.source_weight = [6305, 617, 2227, 244, 85, 165, 23, 13, 1083, 317, 2110, 25, 6, 493, 224, 66, 14, 6, 1]
 
-            # 特征图大小（2048 161 91），根据特征图大小和标签数量比例计算出的默认容量大小
+            # 特征图大小（2048 161 91）(下采样8倍)，根据特征图大小和标签数量比例计算出的默认容量大小
             self.deque_capacities = [2328, 330, 193, 364, 87, 6949, 3159, 935, 197, 89, 14]
 
         else:  # SYNTHIA
-            self.BG_LABEL = [0, 1, 2, 3, 4, 8, 10]
-            self.FG_LABEL = [5, 6, 7, 11, 12, 13, 15, 17, 18]
+            self.BG_LABEL = [0, 1, 2, 3, 4, 8, 9]
+            self.FG_LABEL = [5, 6, 7, 10, 11, 12, 13, 14, 15]
 
-            # SYNTHIA待计算
-            self.deque_capacities = []
+            # 特征图大小（2048 160 95）
+            # array([ 85.59606754, 472.81451195, 494.77850212, 750.52920229,
+            #          6.89837241,   6.88019907,  26.59592289,   1.        ,
+            #          2.5971885 , 263.51557193, 175.39588055, 108.65349356,
+            #         11.99949387, 103.79542911,  38.99894613,   5.28002645])
+            self.deque_capacities = [218, 845, 32, 5570, 3451, 381, 3296, 1239, 168]
 
         # 像素点数量和权重
         self.source_num_pixel_BG, self.target_num_pixel_BG = [0] * len(self.BG_LABEL), [0] * len(self.BG_LABEL)
@@ -376,10 +380,10 @@ class STLoss(nn.Module):
         thing_alignment_loss = self.things_alignment(loss_type=kwargs['thing_type'])
 
         # entropy loss
-        EM_loss = self.entropy_loss(pred_softmax=kwargs.get('target_prob'), label=kwargs.get('target_label'), loss_type=kwargs['entropy_type'])
+        em_loss = self.entropy_loss(pred_softmax=kwargs.get('target_prob'), label=kwargs.get('target_label'), loss_type=kwargs['entropy_type'])
 
         # loss dic
-        output = {'stuff_alignment_loss': stuff_alignment_loss, 'thing_alignment_loss': thing_alignment_loss, 'EM_loss': EM_loss}
+        output = {'stuff_alignment_loss': stuff_alignment_loss, 'thing_alignment_loss': thing_alignment_loss, 'em_loss': em_loss}
         return output
 
 
