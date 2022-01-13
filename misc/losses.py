@@ -113,11 +113,11 @@ class STLoss(nn.Module):
         label_dws = label_dws.view(-1)  # size N（N = B x h x w）
 
         if domain == 'source':
-            self.source_feat = feat.detach()  # N x F, 每一个点的特征向量，需要detach防止回传到源域的前向传播
-            self.source_label = label_dws  # N , 源域预测正确标签
+            self.source_feat = feat         # N x F, 每一个点的特征向量，
+            self.source_label = label_dws   # N , 源域预测正确标签
         else:
-            self.target_feat = feat  # N x F, 每一个点的特征向量
-            self.target_label = label_dws  # N,  目标域补全伪标签
+            self.target_feat = feat         # N x F, 每一个点的特征向量
+            self.target_label = label_dws   # N,  目标域补全伪标签
 
     def computer_stuff(self, centroids_smoothing=-1):
 

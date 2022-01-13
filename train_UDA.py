@@ -108,7 +108,7 @@ class Trainer:
             if not os.path.exists(self.pseudo_label_dir):  # 新建伪标签文件夹
                 self.gen_pseudo_label()
             else:
-                self.logger.info(self.pseudo_label_dir + 'exists! Skip gen pseudo label')  # 伪标签文件夹已存在，则跳过
+                self.logger.info(self.pseudo_label_dir + ' exists! Skip gen pseudo label')  # 伪标签文件夹已存在，则跳过
             self.updata_target_dataloader()  # 更新目标域的dataloader
             self.train_one_round()
             self.current_round += 1
@@ -264,7 +264,7 @@ class Trainer:
 
             # loss计算、反向传播
             cur_loss = self.loss(pred_source, labels)  # 交叉熵损失函数
-            cur_loss.backward(retain_graph=True)  # 反向传播
+            cur_loss.backward()  # 反向传播
             log_dic['Source_ce_loss'] = cur_loss.item()
 
             #######################
@@ -272,20 +272,20 @@ class Trainer:
             #######################
 
             # target data (unlabeld)
-            images, pseudo_labels, _ = data_s
+            images, pseudo_labels, _ = data_t
             images, pseudo_labels = images.to(self.device), pseudo_labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,h,w)
             pseudo_labels = torch.squeeze(pseudo_labels, 1)  # (b,h,w) ==> (b,1, h,w)
 
             # 前向传播
             pred_target, feat_target = self.model(images)  # (b c h w)  (b f h' w')
-            pred_target_softmax = torch.nn.functional.softmax(pred_source, dim=1)  # (b c h' w')
+            pred_target_softmax = torch.nn.functional.softmax(pred_target, dim=1)  # (b c h' w')
 
-            loss_kwargs['source_prob'] = pred_source_softmax.detach()    # 源域预测结果softmax,
-            loss_kwargs['target_prob'] = pred_target_softmax    # 目标域预测结果softmax
-            loss_kwargs['source_feat'] = feat_source.detach()            # 源域的中间特征
-            loss_kwargs['target_feat'] = feat_target            # 目标域的中间特征
-            loss_kwargs['source_label'] = labels.detach()                # 源域的标签
-            loss_kwargs['target_label'] = pseudo_labels         # 目标域的伪标签
+            loss_kwargs['source_prob'] = pred_source_softmax.detach()       # 源域预测结果softmax, 源域的所有 tensor 需要detach防止回传到源域的前向传播
+            loss_kwargs['target_prob'] = pred_target_softmax                # 目标域预测结果softmax
+            loss_kwargs['source_feat'] = feat_source.detach()               # 源域的中间特征
+            loss_kwargs['target_feat'] = feat_target                        # 目标域的中间特征
+            loss_kwargs['source_label'] = labels.detach()                   # 源域的标签
+            loss_kwargs['target_label'] = pseudo_labels                     # 目标域的伪标签
 
             # 传入参数，计算当前批次的目标域的损失
             loss_dict = self.feat_reg_ST_loss(**loss_kwargs)
@@ -393,7 +393,7 @@ class Trainer:
 
 def init_config(config_path):
     # Reading configuration file
-    config = yaml.load(open(config_path, "r"), Loader=yaml.FullLoader)
+    config = yaml.load(open(config_path, "r",  encoding='utf-8'), Loader=yaml.FullLoader)
     train_conf = config['train']
 
     assert train_conf['num_classes'] == 19 if train_conf['source_data_name'] == 'gta5' else train_conf['num_classes'] == 16
@@ -409,13 +409,25 @@ def init_config(config_path):
 
     # checkpoint_dir configure
     checkpoint_dir = train_conf['checkpoint_dir']
-    assert not os.path.exists(checkpoint_dir), "checkpoint dir exists! rm -r {}".format(checkpoint_dir)
-    try:
-        os.makedirs(checkpoint_dir)
-        train_conf['checkpoint_dir'] = checkpoint_dir
-    except FileNotFoundError:
-        print('Missing parent folder in path:  {}'.format(checkpoint_dir))
-        exit()
+    if os.path.exists(checkpoint_dir):
+        key_str = input("删除该文件夹请输入：d\n忽略请输入：c\n结束请输入：e\n请选择:")
+        if key_str == 'd':
+            shutil.rmtree(checkpoint_dir)
+            print("remove {} successfully".format(checkpoint_dir))
+        elif key_str == 'c':
+            print("continue training！")
+        elif key_str == 'e':
+            print('exit!')
+            exit(0)
+        else:
+            print('error input')
+            exit(0)
+    if not os.path.exists(checkpoint_dir):
+        try:
+            os.makedirs(checkpoint_dir)
+        except FileNotFoundError:
+            print('Missing parent folder in path:  {}'.format(checkpoint_dir))
+            exit()
 
     # save config
     shutil.copy(config_path, checkpoint_dir)
