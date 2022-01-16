@@ -74,7 +74,6 @@ class Evaluater():
 
 
                 images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)    # (b,3,h,w), (b,H,W) val评估的时候，需要原图大小的标签
-                labels = torch.squeeze(labels, 1)                                                           # (b,H,W) ==> (b,1,H,W)
 
                 preds, _ = self.model(images)  # prediction, feature
                 probs = torch.nn.functional.softmax(preds, dim=1)
@@ -89,7 +88,7 @@ class Evaluater():
                 arg_probs = arg_probs.to(torch.float32)                                                     # interpolate 不能处理int类型
                 labels = labels.to(torch.float32).unsqueeze(dim=1)                                          # interpolate 不能处理int类型, 必须要4维， (b,H,W) ==> (b,1,H,W)
                 if self.conf['evl_with_original']:
-                    b, H, W = labels.shape
+                    b, _, H, W = labels.shape
                     arg_probs = torch.nn.functional.interpolate(arg_probs, size=(H, W), mode='nearest')     # (b,1,h,w) ==> (b,1,H,W) 上采样
                 else:
                     b, _, h, w = arg_probs.shape
