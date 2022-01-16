@@ -105,8 +105,8 @@ class Evaluater():
 
                     label_name = id_labels[0].split('/')[-1]
 
-                    output.save(os.path.join(self.checkpoint_dir, label_name))
-                    output_col.save(os.path.join(self.checkpoint_dir, label_name))
+                    output.save(os.path.join(self.id_mask_dir, label_name))
+                    output_col.save(os.path.join(self.id_mask_dir, label_name))
 
                 # if batch_idx % 20 == 0:
                 #     self.save_images(images, labels, arg_probs, 'target_val')  # 可视化最后一次迭代的图片
