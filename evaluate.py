@@ -86,12 +86,13 @@ class Evaluater():
 
                 arg_probs = torch.argmax(probs, dim=1, keepdim=True)                                        # 预测类别, (b,c,h,w) ==> (b,1,h,w) (要对h，w上采样，interpolate输入必须为4维。因此要keepdim)
                 arg_probs = arg_probs.to(torch.float32)                                                     # interpolate 不能处理int类型
+                labels = labels.to(torch.float32).unsqueeze(dim=1)                                          # interpolate 不能处理int类型, 必须要4维， (b,H,W) ==> (b,1,H,W)
                 if self.conf['evl_with_original']:
                     b, H, W = labels.shape
                     arg_probs = torch.nn.functional.interpolate(arg_probs, size=(H, W), mode='nearest')     # (b,1,h,w) ==> (b,1,H,W) 上采样
                 else:
                     b, _, h, w = arg_probs.shape
-                    labels = torch.nn.functional.interpolate(labels.unsqueeze(dim=1), size=(h, w), mode='nearest')           # (b,H,W) ==> (b,1,H,W) ==> (b,1,h,w) 上采样
+                    labels = torch.nn.functional.interpolate(labels, size=(h, w), mode='nearest')           # (b,1,H,W) ==> (b,1,h,w) 下采样
                 arg_probs = arg_probs.squeeze(dim=1).to(torch.long)                                         # (b,1,H,W) ==> (b,H,W), 和labels数据类型一致
                 labels = labels.squeeze(dim=1).to(torch.long)                                               # (b,1,H,W) ==> (b,H,W)
                 self.eval.add_batch(labels.cpu().numpy(), arg_probs.cpu().numpy())
