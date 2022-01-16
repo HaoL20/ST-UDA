@@ -82,6 +82,7 @@ class Evaluater():
                 if self.conf['flip']:
                     preds_flip, _ = self.model(torch.flip(images, dims=[3]))     # 水平翻转
                     probs_flip = torch.nn.functional.softmax(preds_flip, dim=1)
+                    probs_flip = torch.flip(probs_flip, dims=[3])
                     probs = (probs+probs_flip)/2
 
                 arg_probs = torch.argmax(probs, dim=1, keepdim=True)                                        # 预测类别, (b,c,h,w) ==> (b,1,h,w) (要对h，w上采样，interpolate输入必须为4维。因此要keepdim)
