@@ -256,7 +256,6 @@ class Trainer:
             # train data (labeled)
             images, labels, _ = data_s
             images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,h,w)
-            labels = torch.squeeze(labels, 1)  # (b,h,w) ==> (b,1, h,w)
 
             # 前向传播
             pred_source, feat_source = self.model(images)  # (b c h w)  (b f h' w')
@@ -274,7 +273,6 @@ class Trainer:
             # target data (unlabeld)
             images, pseudo_labels, _ = data_t
             images, pseudo_labels = images.to(self.device), pseudo_labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,h,w)
-            pseudo_labels = torch.squeeze(pseudo_labels, 1)  # (b,h,w) ==> (b,1, h,w)
 
             # 前向传播
             pred_target, feat_target = self.model(images)  # (b c h w)  (b f h' w')
@@ -338,7 +336,6 @@ class Trainer:
 
                 b, H, W = labels.shape
                 images, labels = images.to(self.device), labels.to(device=self.device, dtype=torch.long)  # (b,3,h,w), (b,H,W) val评估的时候，需要原图大小的标签
-                labels = torch.squeeze(labels, 1)  # (b,H,W) ==> (b,1,H,W)
 
                 preds, _ = self.model(images)  # prediction, feature
                 arg_preds = torch.argmax(preds, dim=1, keepdim=True)  # 预测类别, (b,c,h,w) ==> (b,1,h,w) (要对h，w上采样，interpolate输入必须为4维。因此要keepdim)
