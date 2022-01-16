@@ -91,7 +91,7 @@ class Evaluater():
                     arg_probs = torch.nn.functional.interpolate(arg_probs, size=(H, W), mode='nearest')     # (b,1,h,w) ==> (b,1,H,W) 上采样
                 else:
                     b, _, h, w = arg_probs.shape
-                    labels = torch.nn.functional.interpolate(arg_probs, size=(h, w), mode='nearest')        # (b,1,H,W) ==> (b,1,h,w) 上采样
+                    labels = torch.nn.functional.interpolate(labels, size=(h, w), mode='nearest')        # (b,1,H,W) ==> (b,1,h,w) 上采样
                 arg_probs = arg_probs.squeeze(dim=1).to(torch.long)                                         # (b,1,H,W) ==> (b,H,W), 和labels数据类型一致
                 labels = labels.squeeze(dim=1).to(torch.long)                                               # (b,1,H,W) ==> (b,H,W)
                 self.eval.add_batch(labels.cpu().numpy(), arg_probs.cpu().numpy())
