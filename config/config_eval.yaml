@@ -12,8 +12,8 @@ train: # 训练
   pin_memory: True                            # 当计算机的内存充足的时候，可以设置pin_memory=True。当系统卡住，或者交换内存使用过多的时候，设置pin_memory=False。
 
   # other
-  flip: True                                  # 是否使用翻转预测
-  evl_with_original: True                     # 原始尺寸预测还是输出尺寸预测
+  flip: False                                  # 是否使用翻转预测
+  evl_with_original: False                     # 原始尺寸预测还是输出尺寸预测
 
   # keep default  必要的参数，参数不影响，但是必须提供。
   imagenet_pretrained: False
@@ -22,6 +22,7 @@ train: # 训练
   gaussian_blur: False                         # 高斯模糊数据增强
   random_mirror: False                         # 随机镜像数据增强
   lr: 0.001
+  ignore_label: -1
 
   # dataset related arguments
   cityscapes:
