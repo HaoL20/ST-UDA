@@ -123,11 +123,11 @@ class Eval:
         MIoU_str = ''
         ##
         for ind_class in range(len(MIoU)):
-            pa = str(round(MPA[ind_class], 2)) if not np.isnan(MPA[ind_class]) else 'nan'
-            iou = str(round(MIoU[ind_class], 2)) if not np.isnan(MIoU[ind_class]) else 'nan'
-            pc = str(round(Precision[ind_class], 2)) if not np.isnan(Precision[ind_class]) else 'nan'
-            cr = str(round(Class_ratio[ind_class], 2)) if not np.isnan(Class_ratio[ind_class]) else 'nan'
-            pr = str(round(Pred_retio[ind_class], 2)) if not np.isnan(Pred_retio[ind_class]) else 'nan'
+            pa = str(round(MPA[ind_class] * 100, 2)) if not np.isnan(MPA[ind_class]) else 'nan'
+            iou = str(round(MIoU[ind_class] * 100, 2)) if not np.isnan(MIoU[ind_class]) else 'nan'
+            pc = str(round(Precision[ind_class] * 100, 2)) if not np.isnan(Precision[ind_class]) else 'nan'
+            cr = str(round(Class_ratio[ind_class] * 100, 2)) if not np.isnan(Class_ratio[ind_class]) else 'nan'
+            pr = str(round(Pred_retio[ind_class] * 100, 2)) if not np.isnan(Pred_retio[ind_class]) else 'nan'
             class_name_str += name_classes_eval[ind_class] + '\t'
             MIoU_str += iou + '\t'
             if logger is not None:
