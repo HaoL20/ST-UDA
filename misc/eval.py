@@ -43,21 +43,21 @@ class Eval:
         else:
             PA = np.diag(self.confusion_matrix).sum() / self.confusion_matrix.sum()
 
-        return PA
+        return PA * 100
 
     def Mean_Pixel_Accuracy(self, out_16_13=False):
         MPA = np.diag(self.confusion_matrix) / self.confusion_matrix.sum(axis=1)
         if self.synthia:
             MPA_16 = np.nanmean(MPA[:self.ignore_index])
             MPA_13 = np.nanmean(MPA[synthia_set_16_to_13])
-            return MPA_16, MPA_13
+            return MPA_16 * 100, MPA_13 * 100
         if out_16_13:
             MPA_16 = np.nanmean(MPA[synthia_set_16])
             MPA_13 = np.nanmean(MPA[synthia_set_13])
-            return MPA_16, MPA_13
+            return MPA_16 * 100, MPA_13 * 100
         MPA = np.nanmean(MPA[:self.ignore_index])
 
-        return MPA
+        return MPA * 100
 
     def Mean_Intersection_over_Union(self, out_16_13=False):
         MIoU = np.diag(self.confusion_matrix) / (
@@ -66,14 +66,14 @@ class Eval:
         if self.synthia:
             MIoU_16 = np.nanmean(MIoU[:self.ignore_index])
             MIoU_13 = np.nanmean(MIoU[synthia_set_16_to_13])
-            return MIoU_16, MIoU_13
+            return MIoU_16 * 100, MIoU_13 * 100
         if out_16_13:
             MIoU_16 = np.nanmean(MIoU[synthia_set_16])
             MIoU_13 = np.nanmean(MIoU[synthia_set_13])
-            return MIoU_16, MIoU_13
+            return MIoU_16 * 100, MIoU_13 * 100
         MIoU = np.nanmean(MIoU[:self.ignore_index])
 
-        return MIoU
+        return MIoU * 100
 
     def Frequency_Weighted_Intersection_over_Union(self, out_16_13=False):
         FWIoU = np.multiply(np.sum(self.confusion_matrix, axis=1), np.diag(self.confusion_matrix))
@@ -82,27 +82,27 @@ class Eval:
         if self.synthia:
             FWIoU_16 = np.sum(i for i in FWIoU if not np.isnan(i)) / np.sum(self.confusion_matrix)
             FWIoU_13 = np.sum(i for i in FWIoU[synthia_set_16_to_13] if not np.isnan(i)) / np.sum(self.confusion_matrix)
-            return FWIoU_16, FWIoU_13
+            return FWIoU_16 * 100, FWIoU_13 * 100
         if out_16_13:
             FWIoU_16 = np.sum(i for i in FWIoU[synthia_set_16] if not np.isnan(i)) / np.sum(self.confusion_matrix)
             FWIoU_13 = np.sum(i for i in FWIoU[synthia_set_13] if not np.isnan(i)) / np.sum(self.confusion_matrix)
-            return FWIoU_16, FWIoU_13
+            return FWIoU_16 * 100, FWIoU_13 * 100
         FWIoU = np.sum(i for i in FWIoU if not np.isnan(i)) / np.sum(self.confusion_matrix)
 
-        return FWIoU
+        return FWIoU * 100
 
     def Mean_Precision(self, out_16_13=False):
         Precision = np.diag(self.confusion_matrix) / self.confusion_matrix.sum(axis=0)
         if self.synthia:
             Precision_16 = np.nanmean(Precision[:self.ignore_index])
             Precision_13 = np.nanmean(Precision[synthia_set_16_to_13])
-            return Precision_16, Precision_13
+            return Precision_16 * 100, Precision_13 * 100
         if out_16_13:
             Precision_16 = np.nanmean(Precision[synthia_set_16])
             Precision_13 = np.nanmean(Precision[synthia_set_13])
-            return Precision_16, Precision_13
+            return Precision_16 * 100, Precision_13 * 100
         Precision = np.nanmean(Precision[:self.ignore_index])
-        return Precision
+        return Precision * 100
 
     def Print_Every_class_Eval(self, out_16_13=False, logger=None):
         MIoU = np.diag(self.confusion_matrix) / (
@@ -123,11 +123,11 @@ class Eval:
         MIoU_str = ''
         ##
         for ind_class in range(len(MIoU)):
-            pa = str(round(MPA[ind_class] * 100, 2)) if not np.isnan(MPA[ind_class]) else 'nan'
-            iou = str(round(MIoU[ind_class] * 100, 2)) if not np.isnan(MIoU[ind_class]) else 'nan'
-            pc = str(round(Precision[ind_class] * 100, 2)) if not np.isnan(Precision[ind_class]) else 'nan'
-            cr = str(round(Class_ratio[ind_class] * 100, 2)) if not np.isnan(Class_ratio[ind_class]) else 'nan'
-            pr = str(round(Pred_retio[ind_class] * 100, 2)) if not np.isnan(Pred_retio[ind_class]) else 'nan'
+            pa = str(round(MPA[ind_class], 2)) if not np.isnan(MPA[ind_class]) else 'nan'
+            iou = str(round(MIoU[ind_class], 2)) if not np.isnan(MIoU[ind_class]) else 'nan'
+            pc = str(round(Precision[ind_class], 2)) if not np.isnan(Precision[ind_class]) else 'nan'
+            cr = str(round(Class_ratio[ind_class], 2)) if not np.isnan(Class_ratio[ind_class]) else 'nan'
+            pr = str(round(Pred_retio[ind_class], 2)) if not np.isnan(Pred_retio[ind_class]) else 'nan'
             class_name_str += name_classes_eval[ind_class] + '\t'
             MIoU_str += iou + '\t'
             if logger is not None:
@@ -164,8 +164,8 @@ def computer_and_save_metric(name, eval, logger, writer, num_classes, current_ep
         MIoU_16, MIoU_13 = eval.Mean_Intersection_over_Union()
         FWIoU_16, FWIoU_13 = eval.Frequency_Weighted_Intersection_over_Union()
         PC_16, PC_13 = eval.Mean_Precision()
-        logger.info('Results of {}, PA:{:.3f}, MPA_16:{:.3f}, MIoU_16:{:.3f}, FWIoU_16:{:.3f}, PC_16:{:.3f}'.format(name, PA, MPA_16, MIoU_16, FWIoU_16, PC_16))
-        logger.info('Results of {}, PA:{:.3f}, MPA_13:{:.3f}, MIoU_13:{:.3f}, FWIoU_13:{:.3f}, PC_13:{:.3f}'.format(name, PA, MPA_13, MIoU_13, FWIoU_13, PC_13))
+        logger.info('Results of {}, PA:{:.2f}, MPA_16:{:.2f}, MIoU_16:{:.2f}, FWIoU_16:{:.2f}, PC_16:{:.2f}'.format(name, PA, MPA_16, MIoU_16, FWIoU_16, PC_16))
+        logger.info('Results of {}, PA:{:.2f}, MPA_13:{:.2f}, MIoU_13:{:.2f}, FWIoU_13:{:.2f}, PC_13:{:.2f}'.format(name, PA, MPA_13, MIoU_13, FWIoU_13, PC_13))
         if current_epoch:
             writer.add_scalar(name + '/PA', PA, current_epoch)
             writer.add_scalar(name + '/MPA_16', MPA_16, current_epoch)
@@ -181,7 +181,7 @@ def computer_and_save_metric(name, eval, logger, writer, num_classes, current_ep
         MIoU = eval.Mean_Intersection_over_Union()
         FWIoU = eval.Frequency_Weighted_Intersection_over_Union()
         PC = eval.Mean_Precision()
-        logger.info('Results of {}, PA1:{:.3f}, MPA1:{:.3f}, MIoU1:{:.3f}, FWIoU1:{:.3f}, PC:{:.3f}'.format(name, PA, MPA, MIoU, FWIoU, PC))
+        logger.info('Results of {}, PA1:{:.2f}, MPA1:{:.2f}, MIoU1:{:.2f}, FWIoU1:{:.2f}, PC:{:.2f}'.format(name, PA, MPA, MIoU, FWIoU, PC))
         if current_epoch:
             writer.add_scalar(name + '/PA', PA, current_epoch)
             writer.add_scalar(name + '/MPA', MPA, current_epoch)
