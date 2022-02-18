@@ -1,4 +1,12 @@
 import os
+
+import argparse
+arg_parser = argparse.ArgumentParser()
+arg_parser.add_argument('--gpu', type=str, default="0", help=" the num of gpu")
+arg_parser.add_argument('--conf', type=str, default="config/config_eval.yaml", help=" the num of gpu")
+opt = arg_parser.parse_args()
+os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu
+
 import yaml
 import shutil
 import logging
@@ -19,8 +27,8 @@ class Evaluater():
         self.logger = logger
 
         self.checkpoint_dir = conf['checkpoint_dir']
-        self.id_mask_dir = os.path.dirname(os.path.join(self.checkpoint_dir, 'id_mask'))
-        self.color_mask_dir = os.path.dirname(os.path.join(self.checkpoint_dir, 'color_mask'))
+        self.id_mask_dir = os.path.join(self.checkpoint_dir, 'id_mask')
+        self.color_mask_dir = os.path.join(self.checkpoint_dir, 'color_mask')
         if not os.path.exists(self.id_mask_dir):
             os.makedirs(self.id_mask_dir)
         if not os.path.exists(self.color_mask_dir):
@@ -106,7 +114,7 @@ class Evaluater():
                     label_name = id_labels[0].split('/')[-1]
 
                     output.save(os.path.join(self.id_mask_dir, label_name))
-                    output_col.save(os.path.join(self.id_mask_dir, label_name))
+                    output_col.save(os.path.join(self.color_mask_dir, label_name))
 
                 # if batch_idx % 20 == 0:
                 #     self.save_images(images, labels, arg_probs, 'target_val')  # 可视化最后一次迭代的图片
@@ -151,12 +159,12 @@ def init_config(config_path):
     data_conf = train_conf[data_name]  # 数据集参数
     data_conf['size'] = tuple(map(int, data_conf['size'].split(',')))  # 将size的h,w转换为int，并且组合为tuple类型
 
-    assert train_conf['num_classes'] == 19 if data_name in ['gta5', 'cityscapes'] else train_conf['num_classes'] == 16
+    # assert train_conf['num_classes'] == 19 if data_name in ['gta5', 'cityscapes'] else train_conf['num_classes'] == 16
 
     # checkpoint_dir configure
     checkpoint_dir = train_conf['checkpoint_dir']
     if os.path.exists(checkpoint_dir):
-        key_str = input("删除该文件夹请输入：d\n忽略请输入：c\n结束请输入：e\n请选择:")
+        key_str = input("{}已经存在！\n删除该文件夹请输入：d\n忽略请输入：c\n结束请输入：e\n请选择:".format(checkpoint_dir))
         if key_str == 'd':
             shutil.rmtree(checkpoint_dir)
             print("remove {} successfully".format(checkpoint_dir))
@@ -202,7 +210,8 @@ def init_config(config_path):
 
 
 def main():
-    config_path = "config/config_eval.yaml"
+    config_path = opt.conf
+    # config_path = "config/config_eval.yaml"
     train_conf, logger, device = init_config(config_path)
     agent = Evaluater(train_conf, logger, device)
     agent.main()
