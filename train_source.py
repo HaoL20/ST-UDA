@@ -1,4 +1,12 @@
 import os
+
+import argparse
+arg_parser = argparse.ArgumentParser()
+arg_parser.add_argument('--gpu', type=str, default="0", help=" the num of gpu")
+arg_parser.add_argument('--conf', type=str, default="config/config_eval.yaml", help=" the num of gpu")
+opt = arg_parser.parse_args()
+os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu
+
 import yaml
 import shutil
 import random
@@ -249,13 +257,27 @@ def init_config(config_path):
 
     # checkpoint_dir configure
     checkpoint_dir = train_conf['checkpoint_dir']
-    assert not os.path.exists(checkpoint_dir), "checkpoint dir exists! rm -r {}".format(checkpoint_dir)
-    try:
-        os.makedirs(checkpoint_dir)
-        train_conf['checkpoint_dir'] = checkpoint_dir
-    except FileNotFoundError:
-        print('Missing parent folder in path:  {}'.format(checkpoint_dir))
-        exit()
+    if os.path.exists(checkpoint_dir):
+        key_str = input("{}已经存在！\n删除该文件夹请输入：d\n忽略请输入：c\n结束请输入：e\n请选择:".format(checkpoint_dir))
+        if key_str == 'd':
+            shutil.rmtree(checkpoint_dir)
+            print("remove {} successfully".format(checkpoint_dir))
+        elif key_str == 'c':
+            print("continue training！")
+        elif key_str == 'e':
+            print('exit!')
+            exit(0)
+        else:
+            print('error input')
+            exit(0)
+    if not os.path.exists(checkpoint_dir):
+        try:
+            os.makedirs(checkpoint_dir)
+        except FileNotFoundError:
+            print('Missing parent folder in path:  {}'.format(checkpoint_dir))
+            exit()
+
+
 
     # save config
     shutil.copy(config_path, checkpoint_dir)
@@ -301,7 +323,8 @@ def init_config(config_path):
 
 
 def main():
-    config_path = "config/config_train_source.yaml"
+    # config_path = "config/config_train_source.yaml"
+    config_path = opt.conf
     train_conf, logger, device = init_config(config_path)
     agent = Trainer(train_conf, logger, device)
     agent.main()
