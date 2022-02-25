@@ -355,7 +355,7 @@ class Trainer:
 
             #  可视化最后一次迭代的图片
             self.save_images(images, labels, arg_preds, name)
-            PA, MPA, MIoU, FWIoU = computer_and_save_metric(name, self.eval, self.logger, self.writer, self.current_epoch, self.conf['num_classes'])
+            PA, MPA, MIoU, FWIoU = computer_and_save_metric(name, self.eval, self.logger, self.writer,  self.conf['num_classes'], self.current_epoch)
             tqdm_batch.close()
 
         return PA, MPA, MIoU, FWIoU
