@@ -178,7 +178,8 @@ class Trainer:
             thre_std = torch.tensor(thre_std).cuda()[max_idx].detach()  # (b,h,w)
 
             if self.use_uncertainty:  # 大于置信度阈值，小于不确定性阈值的像素点选择为伪标签
-                selected_idx = (max_value >= thre_conf) * (max_std < thre_std)
+                # selected_idx = (max_value >= thre_conf) * (max_std < thre_std)
+                selected_idx = (max_value >= thre_conf) + (max_std < thre_std) # 修改为 or 运算
             else:
                 selected_idx = max_value >= thre_conf
             unselected_idx = ~selected_idx  # 取反，选择所以不满足条件的像素点
